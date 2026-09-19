@@ -37,7 +37,8 @@
 #include <glslang_c_interface.h>
 #include "PipelineCacheManager.h"
 #include "QueueManager.h"
-#include <GLFW/glfw3.h>
+#include <SDL.h>
+#include <SDL_vulkan.h>
 
 //Lots of warnings here, disable them
 #pragma GCC diagnostic push
@@ -261,7 +262,7 @@ bool g_vulkanDeviceIsApplePV = false;
 void VulkanCleanup();
 
 bool VulkanInitInstance(
-	bool skipGLFW,
+	bool skipWindowingInit,
 	bool& vulkan11Available,
 	bool& vulkan12Available,
 	bool& hasPhysicalDeviceProperties2);
@@ -281,13 +282,13 @@ void VulkanCreateDevice(
 	@brief Do context-level Vulkan initialization
 	@ingroup vksupport
 
-	@param skipGLFW Do not initialize GLFW.
+	@param skipWindowingInit Do not initialize SDL.
 
 	This is needed for headless use of libscopehal in unit tests or ATE applications, which may be executed on a
 	machine that does not have a display server running
  */
 bool VulkanInitInstance(
-	bool skipGLFW,
+	bool skipWindowingInit,
 	bool& vulkan11Available,
 	bool& vulkan12Available,
 	bool& hasPhysicalDeviceProperties2)
@@ -341,29 +342,24 @@ bool VulkanInitInstance(
 	else
 		LogDebug("Vulkan 1.2 support not available\n");
 
-	if(skipGLFW)
-		LogDebug("Skipping GLFW init, windowing system support will not be available\n");
+	if(skipWindowingInit)
+		LogDebug("Skipping SDL init, windowing system support will not be available\n");
 	else
 	{
-		//Log glfw version
-		LogDebug("Initializing glfw %s\n", glfwGetVersionString());
+		//Log SDL version
+		SDL_version ver;
+		SDL_GetVersion(&ver);
+		LogDebug("Initializing SDL %d.%d.%d\n", ver.major, ver.minor, ver.patch);
 
-		//Initialize glfw
-		glfwInitHint(GLFW_JOYSTICK_HAT_BUTTONS, GLFW_FALSE);
-		glfwInitHint(GLFW_COCOA_CHDIR_RESOURCES, GLFW_FALSE);
-		if(!glfwInit())
+		//Initialize SDL
+		if(SDL_Init(SDL_INIT_VIDEO) != 0)
 		{
-			LogError("glfw init failed\n");
-			return false;
-		}
-		if(!glfwVulkanSupported())
-		{
-			LogError("glfw vulkan support not available\n");
+			LogError("SDL_Init failed: %s\n", SDL_GetError());
 			return false;
 		}
 	}
 
-	//Request VK_KHR_get_physical_device_properties2 if available, plus all extensions needed by glfw
+	//Request VK_KHR_get_physical_device_properties2 if available, plus all extensions needed by SDL
 	vk::ApplicationInfo appInfo("libscopehal", 1, "Vulkan.hpp", 1, apiVersion);
 	vector<const char*> extensionsToUse;
 	if(hasPhysicalDeviceProperties2)
@@ -384,23 +380,40 @@ bool VulkanInitInstance(
 	#endif
 
 	//See what extensions are required
-	if(!skipGLFW)
+	//SDL_Vulkan_GetInstanceExtensions() requires a live window, and also serves as our Vulkan-support probe
+	//(replacing glfwVulkanSupported()), since no window exists yet at this point in startup
+	if(!skipWindowingInit)
 	{
-		uint32_t glfwRequiredCount = 0;
-		auto glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwRequiredCount);
-		if(glfwExtensions == nullptr)
+		SDL_Window* probe = SDL_CreateWindow(
+			"",
+			0,
+			0,
+			1,
+			1,
+			SDL_WINDOW_VULKAN | SDL_WINDOW_HIDDEN);
+		if(!probe)
 		{
-			const char* err = nullptr;
-			auto code = glfwGetError(&err);
-			LogError("glfwGetRequiredInstanceExtensions failed, code %d (%s)\n", code, err);
+			LogError("SDL Vulkan window creation failed (Vulkan not supported?): %s\n", SDL_GetError());
 			return false;
 		}
-		LogDebug("GLFW required extensions:\n");
-		for(size_t i=0; i<glfwRequiredCount; i++)
+
+		unsigned int sdlExtCount = 0;
+		if(!SDL_Vulkan_GetInstanceExtensions(probe, &sdlExtCount, nullptr))
+		{
+			LogError("SDL_Vulkan_GetInstanceExtensions (count) failed: %s\n", SDL_GetError());
+			SDL_DestroyWindow(probe);
+			return false;
+		}
+		vector<const char*> sdlExtensions(sdlExtCount);
+		SDL_Vulkan_GetInstanceExtensions(probe, &sdlExtCount, sdlExtensions.data());
+		SDL_DestroyWindow(probe);
+
+		LogDebug("SDL required extensions:\n");
+		for(auto ext : sdlExtensions)
 		{
 			LogIndenter li2;
-			LogDebug("%s\n", glfwExtensions[i]);
-			extensionsToUse.push_back(glfwExtensions[i]);
+			LogDebug("%s\n", ext);
+			extensionsToUse.push_back(ext);
 		}
 	}
 
@@ -1060,10 +1073,10 @@ void VulkanCreateDevice(
 	@brief Initialize a Vulkan context for compute
 	@ingroup vksupport
 
-	@param skipGLFW Do not initalize GLFW (workaround for what looks like gtk or video driver bug).
+	@param skipWindowingInit Do not initalize SDL (workaround for what looks like gtk or video driver bug).
 					This was a workaround used by glscopeclient and should probably be removed as it's not used now.
  */
-bool VulkanInit(bool skipGLFW)
+bool VulkanInit(bool skipWindowingInit)
 {
 	//Note if asan is active
 	#ifdef __SANITIZE_ADDRESS__
@@ -1079,7 +1092,7 @@ bool VulkanInit(bool skipGLFW)
 		bool vulkan11Available;
 		bool vulkan12Available;
 		bool hasPhysicalDeviceProperties2;
-		if(!VulkanInitInstance(skipGLFW, vulkan11Available, vulkan12Available, hasPhysicalDeviceProperties2))
+		if(!VulkanInitInstance(skipWindowingInit, vulkan11Available, vulkan12Available, hasPhysicalDeviceProperties2))
 			return false;
 
 		//Look at our physical devices and print info out for each one
@@ -1229,7 +1242,7 @@ bool IsDevicePreferred(const vk::PhysicalDeviceProperties& a, const vk::Physical
  */
 void VulkanCleanup()
 {
-	glfwTerminate();
+	SDL_Quit();
 
 	g_pipelineCacheMgr = nullptr;
 

@@ -232,7 +232,7 @@ extern const char g_hex[17];
 void TransportStaticInit();
 void DriverStaticInit();
 
-bool VulkanInit(bool skipGLFW = false);
+bool VulkanInit(bool skipWindowingInit = false);
 void InitializeSearchPaths();
 void InitializePlugins();
 void DetectCPUFeatures();

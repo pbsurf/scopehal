@@ -270,7 +270,7 @@ target_link_libraries(scopehal
 	Vulkan::Loader
 	Vulkan::Headers
 	glslang::glslang
-	glfw
+	SDL2::SDL2
 	${WIN_LIBS}
 	)
 
