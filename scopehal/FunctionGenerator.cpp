@@ -251,11 +251,11 @@ FunctionGenerator::WaveShape FunctionGenerator::GetShapeOfName(const string& nam
 		return FunctionGenerator::SHAPE_HAVERSINE;
 	else if(name == "Cardiac")
 		return FunctionGenerator::SHAPE_CARDIAC;
-	else if(name == "Stairup")
+	else if( (name == "Staircase up") || (name == "Stairup") )
 		return FunctionGenerator::SHAPE_STAIRCASE_UP;
-	else if(name == "Stairdown")
+	else if( (name == "Staircase down") || (name == "Stairdown") )
 		return FunctionGenerator::SHAPE_STAIRCASE_DOWN;
-	else if(name == "Stairtriangular")
+	else if( (name == "Staircase triangular") || (name == "Stairtriangular") )
 		return FunctionGenerator::SHAPE_STAIRCASE_UP_DOWN;
 	else if(name == "Negative pulse")
 		return FunctionGenerator::SHAPE_NEGATIVE_PULSE;
