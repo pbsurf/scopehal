@@ -36,6 +36,8 @@
 
 #ifdef HAS_IIO
 
+#include <sstream>
+
 #include "scopehal.h"
 #include "ComplexChannel.h"
 #include "IIOSDR.h"
@@ -45,15 +47,6 @@ using namespace std;
 //Names of the IIO devices in the Linux ad9361 driver stack
 static const char* g_phyDevice = "ad9361-phy";
 static const char* g_rxDevice = "cf-ad9361-lpc";
-
-//Known limits of the AD936x family, used to clamp requests. The hardware may be more restrictive
-//(the AD9363 only goes from 325 MHz to 3.8 GHz, for example) in which case we read back what it actually did.
-static const int64_t g_minCenterFreq = 70000000;
-static const int64_t g_maxCenterFreq = 6000000000;
-static const int64_t g_minBandwidth = 200000;
-static const int64_t g_maxBandwidth = 56000000;
-static const uint64_t g_minSampleRate = 2083334;
-static const uint64_t g_maxSampleRate = 61440000;
 
 //Full scale of the 12 bit ADC (sign extended into 16 bits by libiio)
 static const float g_adcScale = 1.0f / 2048;
@@ -81,6 +74,9 @@ IIOSDR::IIOSDR(SCPITransport* transport)
 	, m_hwCenterFreq(m_centerFreq)
 	, m_hwSampleRate(m_sampleRate)
 {
+	//Conservative limits until we've looked at the radio
+	m_limits = { 70000000, 6000000000, 200000, 56000000, 2083334, 61440000, -3, 71 };
+
 	auto iio = dynamic_cast<SCPIIIOTransport*>(transport);
 	if(iio)
 		m_ctx = iio->GetContext();
@@ -126,10 +122,21 @@ IIOSDR::IIOSDR(SCPITransport* transport)
 	if(m_numRx > 0)
 		m_channelEnabled[0] = true;
 
+	m_gain.resize(m_numRx, 0);
+	m_gainMode.resize(m_numRx);
+	m_gainDirty.resize(m_numRx, false);
+	m_gainModeDirty.resize(m_numRx, false);
+
+	DetectLimits();
+
 	//Adopt whatever the radio is currently doing rather than stomping on it
 	ReadHardwareConfiguration();
 	LogDebug("IIO SDR has %zu receive path(s), LO %" PRId64 " Hz, rate %" PRIu64 " Hz, bandwidth %" PRId64 " Hz\n",
 		m_numRx, m_centerFreq, m_sampleRate, m_span);
+	LogDebug("Limits: LO %" PRId64 " - %" PRId64 " Hz, bandwidth %" PRId64 " - %" PRId64 " Hz, rate %" PRIu64 " - %" PRIu64
+		" Hz, gain %.0f - %.0f dB\n",
+		m_limits.minCenterFreq, m_limits.maxCenterFreq, m_limits.minBandwidth, m_limits.maxBandwidth,
+		m_limits.minSampleRate, m_limits.maxSampleRate, m_limits.minGain, m_limits.maxGain);
 }
 
 IIOSDR::~IIOSDR()
@@ -161,7 +168,84 @@ string IIOSDR::GetChannelColor(size_t i)
 }
 
 /**
-	@brief Reads the current LO frequency, sample rate, and bandwidth from the hardware and adopts them
+	@brief Reads an IIO range attribute of the form "[min step max]"
+
+	@param min		Minimum value
+	@param max		Maximum value
+
+	@return		True if the attribute exists and could be parsed
+ */
+static bool ReadRange(
+	IIOContext* ctx, const char* dev, const char* chan, bool output, const string& attr, double& min, double& max)
+{
+	string tmp;
+	if(!ctx->HasChannelAttr(dev, chan, output, attr))
+		return false;
+	if(!ctx->ReadChannelAttr(dev, chan, output, attr, tmp))
+		return false;
+
+	double step;
+	return (3 == sscanf(tmp.c_str(), "[%lf %lf %lf]", &min, &step, &max));
+}
+
+/**
+	@brief Figures out what this radio can do
+
+	We start with defaults for the chip in the radio (the AD9363 in a stock PlutoSDR can't tune as far as an AD9361),
+	then use the ranges published by the driver if they are available since these are authoritative and reflect any
+	firmware unlocking.
+ */
+void IIOSDR::DetectLimits()
+{
+	//Everything we understand is the same as the AD9361 other than the AD9363
+	auto model = m_ctx->GetAttributes()["hw_model"];
+	if(model.find("AD9363") != string::npos)
+	{
+		m_limits.minCenterFreq = 325000000;
+		m_limits.maxCenterFreq = 3800000000;
+		m_limits.maxBandwidth = 20000000;
+	}
+
+	double lo;
+	double hi;
+	if(ReadRange(m_ctx, g_phyDevice, "altvoltage0", true, "frequency_available", lo, hi))
+	{
+		m_limits.minCenterFreq = lo;
+		m_limits.maxCenterFreq = hi;
+	}
+	if(ReadRange(m_ctx, g_phyDevice, "voltage0", false, "rf_bandwidth_available", lo, hi))
+	{
+		m_limits.minBandwidth = lo;
+		m_limits.maxBandwidth = hi;
+	}
+	if(ReadRange(m_ctx, g_phyDevice, "voltage0", false, "sampling_frequency_available", lo, hi))
+	{
+		m_limits.minSampleRate = lo;
+		m_limits.maxSampleRate = hi;
+	}
+	if(ReadRange(m_ctx, g_phyDevice, "voltage0", false, "hardwaregain_available", lo, hi))
+	{
+		m_limits.minGain = lo;
+		m_limits.maxGain = hi;
+	}
+
+	//Gain control modes, in the order the driver lists them
+	m_gainModes.clear();
+	string modes;
+	if(m_ctx->HasChannelAttr(g_phyDevice, "voltage0", false, "gain_control_mode_available") &&
+		m_ctx->ReadChannelAttr(g_phyDevice, "voltage0", false, "gain_control_mode_available", modes))
+	{
+		stringstream ss(modes);
+		string mode;
+		while(ss >> mode)
+			m_gainModes.push_back(mode);
+	}
+	if(m_gainModes.empty())
+		m_gainModes = { "manual", "slow_attack", "fast_attack", "hybrid" };
+}
+
+/**
+	@brief Reads the current LO frequency, sample rate, bandwidth, and gain from the hardware and adopts them
  */
 void IIOSDR::ReadHardwareConfiguration()
 {
@@ -182,6 +266,19 @@ void IIOSDR::ReadHardwareConfiguration()
 	m_centerFreqDirty = false;
 	m_spanDirty = false;
 	m_sampleRateDirty = false;
+
+	for(size_t i=0; i<m_numRx; i++)
+	{
+		string id = "voltage" + to_string(i);
+		string mode;
+		double gain;
+		if(m_ctx->ReadChannelAttr(g_phyDevice, id, false, "gain_control_mode", mode))
+			m_gainMode[i] = mode;
+		if(m_ctx->ReadChannelAttrDouble(g_phyDevice, id, false, "hardwaregain", gain))
+			m_gain[i] = gain;
+		m_gainDirty[i] = false;
+		m_gainModeDirty[i] = false;
+	}
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -210,6 +307,11 @@ void IIOSDR::ApplyConfiguration()
 	int64_t freq;
 	int64_t span;
 	uint64_t rate;
+	vector<string> gainMode(m_numRx);
+	vector<float> gain(m_numRx);
+	vector<bool> doGainMode(m_numRx);
+	vector<bool> doGain(m_numRx);
+	bool any;
 	{
 		lock_guard<recursive_mutex> lock(m_cacheMutex);
 		doRate = m_sampleRateDirty;
@@ -221,9 +323,26 @@ void IIOSDR::ApplyConfiguration()
 		m_sampleRateDirty = false;
 		m_spanDirty = false;
 		m_centerFreqDirty = false;
+
+		any = doRate || doSpan || doFreq;
+		for(size_t i=0; i<m_numRx; i++)
+		{
+			gainMode[i] = m_gainMode[i];
+			gain[i] = m_gain[i];
+
+			doGainMode[i] = m_gainModeDirty[i];
+			m_gainModeDirty[i] = false;
+
+			//The gain can only be set in manual mode. If it's not, leave it pending until we get there.
+			doGain[i] = m_gainDirty[i] && (gainMode[i] == "manual");
+			if(doGain[i])
+				m_gainDirty[i] = false;
+
+			any |= doGainMode[i] || doGain[i];
+		}
 	}
 
-	if(!doRate && !doSpan && !doFreq)
+	if(!any)
 		return;
 
 	//Changing the sample rate can change the analog bandwidth, so do it first
@@ -235,6 +354,16 @@ void IIOSDR::ApplyConfiguration()
 	if(doFreq)
 		m_ctx->WriteChannelAttrInt(g_phyDevice, "altvoltage0", true, "frequency", freq);
 
+	//Mode has to be set before gain
+	for(size_t i=0; i<m_numRx; i++)
+	{
+		string id = "voltage" + to_string(i);
+		if(doGainMode[i])
+			m_ctx->WriteChannelAttr(g_phyDevice, id, false, "gain_control_mode", gainMode[i]);
+		if(doGain[i])
+			m_ctx->WriteChannelAttrDouble(g_phyDevice, id, false, "hardwaregain", gain[i]);
+	}
+
 	//Read back what we actually got. If the user changed something again while we were busy, leave it for next time.
 	int64_t hwFreq;
 	int64_t hwSpan;
@@ -242,6 +371,17 @@ void IIOSDR::ApplyConfiguration()
 	bool haveFreq = m_ctx->ReadChannelAttrInt(g_phyDevice, "altvoltage0", true, "frequency", hwFreq);
 	bool haveSpan = m_ctx->ReadChannelAttrInt(g_phyDevice, "voltage0", false, "rf_bandwidth", hwSpan);
 	bool haveRate = m_ctx->ReadChannelAttrInt(g_phyDevice, "voltage0", false, "sampling_frequency", hwRate);
+
+	vector<string> hwGainMode(m_numRx);
+	vector<double> hwGain(m_numRx);
+	vector<bool> haveGainMode(m_numRx);
+	vector<bool> haveGain(m_numRx);
+	for(size_t i=0; i<m_numRx; i++)
+	{
+		string id = "voltage" + to_string(i);
+		haveGainMode[i] = m_ctx->ReadChannelAttr(g_phyDevice, id, false, "gain_control_mode", hwGainMode[i]);
+		haveGain[i] = m_ctx->ReadChannelAttrDouble(g_phyDevice, id, false, "hardwaregain", hwGain[i]);
+	}
 
 	lock_guard<recursive_mutex> lock(m_cacheMutex);
 	if(haveFreq)
@@ -257,6 +397,15 @@ void IIOSDR::ApplyConfiguration()
 		m_hwSampleRate = hwRate;
 		if(!m_sampleRateDirty)
 			m_sampleRate = hwRate;
+	}
+	for(size_t i=0; i<m_numRx; i++)
+	{
+		if(haveGainMode[i] && !m_gainModeDirty[i])
+			m_gainMode[i] = hwGainMode[i];
+
+		//If we still owe the radio a gain (waiting for manual mode) don't clobber it with what's there now
+		if(haveGain[i] && !m_gainDirty[i])
+			m_gain[i] = hwGain[i];
 	}
 }
 
@@ -331,6 +480,75 @@ vector<OscilloscopeChannel::CouplingType> IIOSDR::GetAvailableCouplings(size_t /
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// RX gain
+
+bool IIOSDR::HasGainControl(size_t i)
+{
+	return m_ctx && (i < m_numRx);
+}
+
+vector<string> IIOSDR::GetGainModes(size_t i)
+{
+	if(!HasGainControl(i))
+		return vector<string>();
+	return m_gainModes;
+}
+
+string IIOSDR::GetGainMode(size_t i)
+{
+	if(!HasGainControl(i))
+		return "";
+
+	lock_guard<recursive_mutex> lock(m_cacheMutex);
+	return m_gainMode[i];
+}
+
+void IIOSDR::SetGainMode(size_t i, const string& mode)
+{
+	if(!HasGainControl(i))
+		return;
+
+	if(find(m_gainModes.begin(), m_gainModes.end(), mode) == m_gainModes.end())
+	{
+		LogWarning("Unsupported IIO gain control mode \"%s\"\n", mode.c_str());
+		return;
+	}
+
+	lock_guard<recursive_mutex> lock(m_cacheMutex);
+	m_gainMode[i] = mode;
+	m_gainModeDirty[i] = true;
+}
+
+bool IIOSDR::IsGainAdjustable(size_t i)
+{
+	return HasGainControl(i) && (GetGainMode(i) == "manual");
+}
+
+pair<float, float> IIOSDR::GetGainRange(size_t /*i*/)
+{
+	return pair<float, float>(m_limits.minGain, m_limits.maxGain);
+}
+
+float IIOSDR::GetGain(size_t i)
+{
+	if(!HasGainControl(i))
+		return 0;
+
+	lock_guard<recursive_mutex> lock(m_cacheMutex);
+	return m_gain[i];
+}
+
+void IIOSDR::SetGain(size_t i, float gain)
+{
+	if(!HasGainControl(i))
+		return;
+
+	lock_guard<recursive_mutex> lock(m_cacheMutex);
+	m_gain[i] = min(max(gain, m_limits.minGain), m_limits.maxGain);
+	m_gainDirty[i] = true;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Timebase and LO configuration
 
 uint64_t IIOSDR::GetSampleRate()
@@ -342,7 +560,7 @@ uint64_t IIOSDR::GetSampleRate()
 void IIOSDR::SetSampleRate(uint64_t rate)
 {
 	lock_guard<recursive_mutex> lock(m_cacheMutex);
-	m_sampleRate = min(max(rate, g_minSampleRate), g_maxSampleRate);
+	m_sampleRate = min(max(rate, m_limits.minSampleRate), m_limits.maxSampleRate);
 	m_sampleRateDirty = true;
 }
 
@@ -361,7 +579,7 @@ void IIOSDR::SetSampleDepth(uint64_t depth)
 vector<uint64_t> IIOSDR::GetSampleRatesNonInterleaved()
 {
 	//Common rates that the AD936x clock chain can generate
-	return
+	static const uint64_t rates[] =
 	{
 		2500000,
 		3000000,
@@ -379,6 +597,14 @@ vector<uint64_t> IIOSDR::GetSampleRatesNonInterleaved()
 		50000000,
 		61440000
 	};
+
+	vector<uint64_t> ret;
+	for(auto r : rates)
+	{
+		if( (r >= m_limits.minSampleRate) && (r <= m_limits.maxSampleRate) )
+			ret.push_back(r);
+	}
+	return ret;
 }
 
 vector<uint64_t> IIOSDR::GetSampleDepthsNonInterleaved()
@@ -389,7 +615,7 @@ vector<uint64_t> IIOSDR::GetSampleDepthsNonInterleaved()
 void IIOSDR::SetSpan(int64_t span)
 {
 	lock_guard<recursive_mutex> lock(m_cacheMutex);
-	m_span = min(max(span, g_minBandwidth), g_maxBandwidth);
+	m_span = min(max(span, m_limits.minBandwidth), m_limits.maxBandwidth);
 	m_spanDirty = true;
 }
 
@@ -403,7 +629,7 @@ void IIOSDR::SetCenterFrequency(size_t /*channel*/, int64_t freq)
 {
 	//There's only one RX LO, shared by all receive paths
 	lock_guard<recursive_mutex> lock(m_cacheMutex);
-	m_centerFreq = min(max(freq, g_minCenterFreq), g_maxCenterFreq);
+	m_centerFreq = min(max(freq, m_limits.minCenterFreq), m_limits.maxCenterFreq);
 	m_centerFreqDirty = true;
 }
 

@@ -47,9 +47,13 @@
 
 	URIs: "mock:" or "mock:ad9363" (1R1T, Pluto-like), "mock:ad9361" (2R2T)
 
+	Like the real driver, it publishes the supported ranges as "<attr>_available" attributes.
+
 	CaptureBlock() synthesizes a handful of fixed-frequency RF tones plus noise. These are simulated at their real RF
 	frequencies, so they move around or disappear as you retune the LO, change the sample rate, or narrow the RF
 	bandwidth. It also takes as long as a real capture would (up to a limit).
+	In manual gain mode the signal scales with the RX gain (0 dB relative to 20 dB gain, with clipping at full scale),
+	while the AGC modes always hold it constant.
 
 	The attribute names, channel layout, and device names follow the Linux ad9361 driver as used by pyadi-iio.
 	Value ranges, clamping vs rejection of out-of-range writes, and default values are approximations chosen to
@@ -71,6 +75,8 @@ public:
 	virtual std::vector<std::string> GetDeviceNames() override;
 	virtual bool HasDevice(const std::string& dev) override;
 	virtual bool HasChannel(const std::string& dev, const std::string& chan, bool output) override;
+	virtual bool HasChannelAttr(
+		const std::string& dev, const std::string& chan, bool output, const std::string& attr) override;
 
 	virtual bool ReadDeviceAttr(const std::string& dev, const std::string& attr, std::string& value) override;
 	virtual bool WriteDeviceAttr(const std::string& dev, const std::string& attr, const std::string& value) override;
@@ -97,6 +103,8 @@ protected:
 		int64_t minLoHz;
 		int64_t maxLoHz;
 		int64_t maxBandwidthHz;
+		double minGainDb;
+		double maxGainDb;
 	};
 
 	IIOMockContext(const std::string& uri, const Variant& variant);

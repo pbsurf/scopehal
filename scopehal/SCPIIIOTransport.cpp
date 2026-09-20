@@ -74,6 +74,22 @@ string SCPIIIOTransport::GetConnectionString()
 }
 
 /**
+	@brief Lists IIO devices that can be found automatically (currently just USB)
+ */
+vector<TransportEndpoint> SCPIIIOTransport::EnumTransportEndpoints()
+{
+	vector<TransportEndpoint> result;
+	for(auto& it : IIOContext::Scan())
+	{
+		TransportEndpoint endpoint;
+		endpoint.path = it.first;
+		endpoint.description = it.second;
+		result.push_back(endpoint);
+	}
+	return result;
+}
+
+/**
 	@brief Builds a *IDN? style reply (vendor,model,serial,version) from the IIO context attributes
  */
 string SCPIIIOTransport::MakeIdentity()

@@ -58,6 +58,7 @@ public:
 	IIOLibContext& operator=(const IIOLibContext&) =delete;
 
 	static std::unique_ptr<IIOContext> Create(const std::string& uri);
+	static std::vector<std::pair<std::string, std::string> > Scan();
 
 	virtual std::string GetUri() override;
 	virtual std::string GetDescription() override;
@@ -66,6 +67,8 @@ public:
 	virtual std::vector<std::string> GetDeviceNames() override;
 	virtual bool HasDevice(const std::string& dev) override;
 	virtual bool HasChannel(const std::string& dev, const std::string& chan, bool output) override;
+	virtual bool HasChannelAttr(
+		const std::string& dev, const std::string& chan, bool output, const std::string& attr) override;
 
 	virtual bool ReadDeviceAttr(const std::string& dev, const std::string& attr, std::string& value) override;
 	virtual bool WriteDeviceAttr(const std::string& dev, const std::string& attr, const std::string& value) override;

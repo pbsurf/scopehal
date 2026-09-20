@@ -76,6 +76,8 @@ public:
 
 	virtual void FlushRXBuffer() override;
 
+	static std::vector<TransportEndpoint> EnumTransportEndpoints();
+
 	///@brief Gets the IIO context (nullptr if we failed to connect)
 	IIOContext* GetContext()
 	{ return m_context.get(); }

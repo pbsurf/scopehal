@@ -74,6 +74,15 @@ public:
 	 */
 	static std::unique_ptr<IIOContext> Open(const std::string& uri);
 
+	/**
+		@brief Lists IIO contexts that can be found automatically (currently USB devices only)
+
+		This never lists "mock:" devices. It is reasonably fast, but not free, so don't call it every frame.
+
+		@return		List of (URI, description) pairs
+	 */
+	static std::vector<std::pair<std::string, std::string> > Scan();
+
 	///@brief Gets the URI we were opened with
 	virtual std::string GetUri() =0;
 
@@ -87,6 +96,10 @@ public:
 	virtual std::vector<std::string> GetDeviceNames() =0;
 	virtual bool HasDevice(const std::string& dev) =0;
 	virtual bool HasChannel(const std::string& dev, const std::string& chan, bool output) =0;
+
+	///@brief Checks if a channel has an attribute, without logging an error if it doesn't
+	virtual bool HasChannelAttr(
+		const std::string& dev, const std::string& chan, bool output, const std::string& attr) =0;
 
 	//Attribute access (raw strings)
 	virtual bool ReadDeviceAttr(const std::string& dev, const std::string& attr, std::string& value) =0;

@@ -236,22 +236,99 @@ void SCPISDR::SetChannelOffset(size_t i, size_t stream, float offset)
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Gain control (default is no gain control)
+
+bool SCPISDR::HasGainControl(size_t /*i*/)
+{
+	return false;
+}
+
+vector<string> SCPISDR::GetGainModes(size_t /*i*/)
+{
+	return vector<string>();
+}
+
+string SCPISDR::GetGainMode(size_t /*i*/)
+{
+	return "";
+}
+
+void SCPISDR::SetGainMode(size_t /*i*/, const string& /*mode*/)
+{
+	//no-op
+}
+
+bool SCPISDR::IsGainAdjustable(size_t i)
+{
+	return HasGainControl(i);
+}
+
+pair<float, float> SCPISDR::GetGainRange(size_t /*i*/)
+{
+	return pair<float, float>(0, 0);
+}
+
+float SCPISDR::GetGain(size_t /*i*/)
+{
+	return 0;
+}
+
+void SCPISDR::SetGain(size_t /*i*/, float /*gain*/)
+{
+	//no-op
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Serialization
 
 //TODO Implement SCPISDR serialization
 //This is called by Instrument::m_serializers and is not virtual
 //cppcheck-suppress duplInheritedMember
-void SCPISDR::DoSerializeConfiguration(YAML::Node& node, IDTable& table)
+void SCPISDR::DoSerializeConfiguration(YAML::Node& node, IDTable& /*table*/)
 {
-	//node["integration"] = GetIntegrationTime();
+	//Channel nodes themselves are created by Oscilloscope, we just add the SDR specific settings
+	YAML::Node channels = node["channels"];
+	for(size_t i=0; i<GetChannelCount(); i++)
+	{
+		if(!HasGainControl(i))
+			continue;
+
+		YAML::Node channelNode = channels["ch" + to_string(i)];
+		channelNode["index"] = i;
+		auto mode = GetGainMode(i);
+		if(!mode.empty())
+			channelNode["gainmode"] = mode;
+		channelNode["gain"] = GetGain(i);
+	}
 }
 
 //This is called by Instrument::m_preloaders and is not virtual
 //cppcheck-suppress duplInheritedMember
-void SCPISDR::DoLoadConfiguration(int version, const YAML::Node& node, IDTable& idmap)
+void SCPISDR::DoLoadConfiguration(int /*version*/, const YAML::Node& node, IDTable& /*idmap*/)
 {
-	//if(node["integration"])
-	//	SetIntegrationTime(node["integration"].as<int64_t>());
+	//Oscilloscope saves the span, but doesn't restore it
+	if(HasFrequencyControls() && node["span"])
+		SetSpan(node["span"].as<int64_t>());
+
+	auto channels = node["channels"];
+	if(!channels)
+		return;
+
+	for(auto it : channels)
+	{
+		auto cnode = it.second;
+		if(!cnode["index"])
+			continue;
+		size_t i = cnode["index"].as<size_t>();
+		if(i >= GetChannelCount() || !HasGainControl(i))
+			continue;
+
+		//Mode first, since the gain may only be settable in manual mode
+		if(cnode["gainmode"])
+			SetGainMode(i, cnode["gainmode"].as<string>());
+		if(cnode["gain"])
+			SetGain(i, cnode["gain"].as<float>());
+	}
 }
 
 //This is called by Instrument::m_loaders and is not virtual

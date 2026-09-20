@@ -54,6 +54,11 @@ unique_ptr<IIOContext> IIOContext::Open(const string& uri)
 	return IIOLibContext::Create(uri);
 }
 
+vector<pair<string, string> > IIOContext::Scan()
+{
+	return IIOLibContext::Scan();
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Typed attribute helpers
 

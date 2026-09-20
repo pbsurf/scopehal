@@ -137,6 +137,48 @@ bool IIOLibContext::HasChannel(const string& dev, const string& chan, bool outpu
 	return iio_device_find_channel(d, chan.c_str(), output) != nullptr;
 }
 
+bool IIOLibContext::HasChannelAttr(const string& dev, const string& chan, bool output, const string& attr)
+{
+	lock_guard<recursive_mutex> lock(m_mutex);
+
+	auto d = iio_context_find_device(m_ctx, dev.c_str());
+	auto c = d ? iio_device_find_channel(d, chan.c_str(), output) : nullptr;
+	return c && iio_channel_find_attr(c, attr.c_str());
+}
+
+/**
+	@brief Finds IIO devices attached by USB
+
+	Network devices are not scanned, they need DNS-SD support and can take a long time to time out.
+ */
+vector<pair<string, string> > IIOLibContext::Scan()
+{
+	vector<pair<string, string> > ret;
+
+	if(!iio_has_backend("usb"))
+		return ret;
+
+	auto scan = iio_create_scan_context("usb", 0);
+	if(!scan)
+		return ret;
+
+	struct iio_context_info** info = nullptr;
+	ssize_t n = iio_scan_context_get_info_list(scan, &info);
+	for(ssize_t i=0; i<n; i++)
+	{
+		auto uri = iio_context_info_get_uri(info[i]);
+		auto desc = iio_context_info_get_description(info[i]);
+		if(uri)
+			ret.push_back(pair<string, string>(uri, desc ? desc : ""));
+	}
+
+	if(info)
+		iio_context_info_list_free(info);
+	iio_scan_context_destroy(scan);
+
+	return ret;
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Attribute access
 

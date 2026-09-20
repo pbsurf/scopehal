@@ -91,6 +91,16 @@ public:
 	virtual void SetCenterFrequency(size_t channel, int64_t freq) override;
 	virtual int64_t GetCenterFrequency(size_t channel) override;
 
+	//RX gain
+	virtual bool HasGainControl(size_t i) override;
+	virtual std::vector<std::string> GetGainModes(size_t i) override;
+	virtual std::string GetGainMode(size_t i) override;
+	virtual void SetGainMode(size_t i, const std::string& mode) override;
+	virtual bool IsGainAdjustable(size_t i) override;
+	virtual std::pair<float, float> GetGainRange(size_t i) override;
+	virtual float GetGain(size_t i) override;
+	virtual void SetGain(size_t i, float gain) override;
+
 	//Instrument settings
 	virtual bool HasTimebaseControls() override;
 	virtual bool HasFrequencyControls() override;
@@ -109,7 +119,21 @@ public:
 	virtual OscilloscopeChannel* GetExternalTrigger() override;
 
 protected:
+	///@brief Limits of the radio, used to clamp requests
+	struct Limits
+	{
+		int64_t minCenterFreq;
+		int64_t maxCenterFreq;
+		int64_t minBandwidth;
+		int64_t maxBandwidth;
+		uint64_t minSampleRate;
+		uint64_t maxSampleRate;
+		float minGain;
+		float maxGain;
+	};
+
 	std::string GetChannelColor(size_t i);
+	void DetectLimits();
 	void ApplyConfiguration();
 	void ReadHardwareConfiguration();
 
@@ -125,9 +149,19 @@ protected:
 	uint64_t m_sampleRate;
 	uint64_t m_sampleDepth;
 	std::vector<bool> m_channelEnabled;
+	std::vector<float> m_gain;
+	std::vector<std::string> m_gainMode;
+	std::vector<bool> m_gainDirty;
+	std::vector<bool> m_gainModeDirty;
 	bool m_centerFreqDirty;
 	bool m_spanDirty;
 	bool m_sampleRateDirty;
+
+	///@brief Supported gain control modes (same for all channels)
+	std::vector<std::string> m_gainModes;
+
+	///@brief Limits of the radio. Set at startup and never changes.
+	Limits m_limits;
 
 	///@brief Configuration currently active in the hardware. Only touched by the instrument thread.
 	int64_t m_hwCenterFreq;

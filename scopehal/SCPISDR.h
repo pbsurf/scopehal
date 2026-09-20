@@ -79,7 +79,44 @@ public:
 	virtual bool HasFrequencyControls() override;
 	virtual bool HasTimebaseControls() override;
 
-	//RX path controls
+	////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+	// RX gain control
+	//
+	// Drivers that support gain control override all of these. The defaults describe a radio with no gain control.
+
+	/**
+		@brief Returns true if the receive path of channel i has a configurable gain
+	 */
+	virtual bool HasGainControl(size_t i);
+
+	/**
+		@brief Gets the available gain control modes (for example "manual", "slow_attack")
+
+		If this has zero or one entries, there is no choice of mode and the gain is always adjustable.
+	 */
+	virtual std::vector<std::string> GetGainModes(size_t i);
+
+	///@brief Gets the current gain control mode
+	virtual std::string GetGainMode(size_t i);
+
+	///@brief Sets the gain control mode
+	virtual void SetGainMode(size_t i, const std::string& mode);
+
+	/**
+		@brief Returns true if the gain can be set manually in the current gain control mode
+
+		This is false if the radio is running automatic gain control.
+	 */
+	virtual bool IsGainAdjustable(size_t i);
+
+	///@brief Gets the range of allowed gain values, in dB, as (min, max)
+	virtual std::pair<float, float> GetGainRange(size_t i);
+
+	///@brief Gets the gain, in dB
+	virtual float GetGain(size_t i);
+
+	///@brief Sets the gain, in dB
+	virtual void SetGain(size_t i, float gain);
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 	// Configuration storage

@@ -61,10 +61,10 @@ unique_ptr<IIOContext> IIOMockContext::Create(const string& uri)
 
 	if(variant == "ad9363")
 		return unique_ptr<IIOContext>(new IIOMockContext(uri, { variant, "Analog Devices PlutoSDR Rev.B (Z7010-AD9363A)",
-			1, 325000000, 3800000000, 20000000 }));
+			1, 325000000, 3800000000, 20000000, -1, 73 }));
 	else if(variant == "ad9361")
 		return unique_ptr<IIOContext>(new IIOMockContext(uri, { variant, "Analog Devices Mock AD9361 2R2T",
-			2, 70000000, 6000000000, 56000000 }));
+			2, 70000000, 6000000000, 56000000, -3, 71 }));
 
 	LogError("Unknown mock IIO device \"%s\" (supported: ad9363, ad9361)\n", variant.c_str());
 	return nullptr;
@@ -102,6 +102,16 @@ IIOMockContext::IIOMockContext(const string& uri, const Variant& variant)
 				AddAttr(g_phy, id, output, "hardwaregain", "71.000000 dB");
 				AddAttr(g_phy, id, output, "gain_control_mode", "slow_attack");
 				AddAttr(g_phy, id, output, "rssi", "70.00 dB", false);
+
+				//Supported ranges are in IIO "[min step max]" format
+				AddAttr(g_phy, id, output, "gain_control_mode_available", "manual fast_attack slow_attack hybrid", false);
+				AddAttr(g_phy, id, output, "hardwaregain_available",
+					"[" + to_string(static_cast<int>(variant.minGainDb)) + " 1 " +
+					to_string(static_cast<int>(variant.maxGainDb)) + "]", false);
+				AddAttr(g_phy, id, output, "rf_bandwidth_available",
+					"[" + to_string(g_minBandwidthHz) + " 1 " + to_string(variant.maxBandwidthHz) + "]", false);
+				AddAttr(g_phy, id, output, "sampling_frequency_available",
+					"[" + to_string(g_minSampleRateHz) + " 1 " + to_string(g_maxSampleRateHz) + "]", false);
 			}
 		}
 	}
@@ -109,8 +119,12 @@ IIOMockContext::IIOMockContext(const string& uri, const Variant& variant)
 	//Local oscillators (both are output channels, RX_LO is altvoltage0 and TX_LO is altvoltage1)
 	AddChannel(g_phy, true, "altvoltage0", "RX_LO");
 	AddAttr(g_phy, "altvoltage0", true, "frequency", "2400000000");
+	AddAttr(g_phy, "altvoltage0", true, "frequency_available",
+		"[" + to_string(variant.minLoHz) + " 1 " + to_string(variant.maxLoHz) + "]", false);
 	AddChannel(g_phy, true, "altvoltage1", "TX_LO");
 	AddAttr(g_phy, "altvoltage1", true, "frequency", "2400000000");
+	AddAttr(g_phy, "altvoltage1", true, "frequency_available",
+		"[" + to_string(variant.minLoHz) + " 1 " + to_string(variant.maxLoHz) + "]", false);
 
 	AddChannel(g_phy, false, "temp0");
 	AddAttr(g_phy, "temp0", false, "input", "45000", false);
@@ -185,6 +199,14 @@ bool IIOMockContext::HasChannel(const string& dev, const string& chan, bool outp
 {
 	lock_guard<recursive_mutex> lock(m_mutex);
 	return !ResolveChannel(dev, chan, output).empty();
+}
+
+bool IIOMockContext::HasChannelAttr(const string& dev, const string& chan, bool output, const string& attr)
+{
+	lock_guard<recursive_mutex> lock(m_mutex);
+
+	auto id = ResolveChannel(dev, chan, output);
+	return !id.empty() && (m_attrs.find(MakeKey(dev, id, output, attr)) != m_attrs.end());
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -292,8 +314,8 @@ bool IIOMockContext::WriteAttr(
 
 		char* end = nullptr;
 		double v = strtod(value.c_str(), &end);
-		double lo = output ? -89.75 : -3;
-		double hi = output ? 0 : 71;
+		double lo = output ? -89.75 : m_variant.minGainDb;
+		double hi = output ? 0 : m_variant.maxGainDb;
 		if( (end == value.c_str()) || (v < lo) || (v > hi) )
 		{
 			LogError("Failed to write IIO attribute %s = \"%s\": %s\n", what.c_str(), value.c_str(), strerror(EINVAL));
@@ -439,6 +461,23 @@ bool IIOMockContext::CaptureBlock(
 		m_sampleIndex += depth;
 	}
 
+	//Signal level of each RX path. AGC holds it constant, manual gain scales it.
+	vector<double> pathGain;
+	{
+		lock_guard<recursive_mutex> lock(m_mutex);
+		for(size_t i=0; i<m_variant.numChannels; i++)
+		{
+			string id = "voltage" + to_string(i);
+			string mode;
+			double gainDb = 20;
+			ReadAttr(g_phy, id, false, "gain_control_mode", mode);
+			string gain;
+			if(ReadAttr(g_phy, id, false, "hardwaregain", gain))
+				gainDb = strtod(gain.c_str(), nullptr);
+			pathGain.push_back( (mode == "manual") ? pow(10, (gainDb - 20) / 20) : 1.0);
+		}
+	}
+
 	//Signals outside the analog filter or the Nyquist bandwidth are gone
 	double halfBand = min(bw, rate) / 2.0;
 
@@ -451,7 +490,7 @@ bool IIOMockContext::CaptureBlock(
 	for(size_t i=0; i<channels.size(); i++)
 	{
 		//The second RX path sees a slightly weaker and phase shifted version of the same signals
-		double gain = (path[i] == 0) ? 1.0 : 0.6;
+		double gain = ( (path[i] == 0) ? 1.0 : 0.6 ) * pathGain[path[i]];
 		double phaseOffset = path[i] * M_PI / 3;
 
 		vector<double> acc(depth, 0.0);
