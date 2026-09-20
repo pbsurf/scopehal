@@ -25,6 +25,20 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 	endif()
 endif()
 
+# libiio (Analog Devices IIO SDRs such as the ADALM-PLUTO). Optional.
+# We only support the 0.x API. libiio 1.0 has a different (incompatible) API and soname.
+pkg_check_modules(IIO libiio QUIET IMPORTED_TARGET)
+if(IIO_FOUND)
+	if(IIO_VERSION VERSION_GREATER_EQUAL 1.0)
+		message("-- Found libiio ${IIO_VERSION}, but only the 0.x API is supported. IIO SDR support will not be available.")
+		set(IIO_FOUND FALSE)
+	else()
+		message("-- Found libiio: ${IIO_VERSION}")
+	endif()
+else()
+	message("-- libiio not found, IIO SDR (ADALM-PLUTO etc) support will not be available.")
+endif()
+
 # This is needed for the precompiled header
 get_target_property(Vulkan_INCLUDE_DIR Vulkan::Headers INTERFACE_INCLUDE_DIRECTORIES)
 
@@ -82,6 +96,10 @@ set(SCOPEHAL_SOURCES
 	SCPISocketCANTransport.cpp
 	SCPIUARTTransport.cpp
 	SCPIHIDTransport.cpp
+	SCPIIIOTransport.cpp
+	IIOContext.cpp
+	IIOLibContext.cpp
+	IIOMockContext.cpp
 	SCPIDevice.cpp
 
 	IBISParser.cpp
@@ -287,6 +305,13 @@ if(LXI_FOUND)
 		PkgConfig::TIRPC
 	)
 	target_compile_definitions(scopehal PUBLIC HAS_LXI)
+endif()
+
+if(IIO_FOUND)
+	target_link_libraries(scopehal
+		PkgConfig::IIO
+	)
+	target_compile_definitions(scopehal PUBLIC HAS_IIO)
 endif()
 
 target_include_directories(scopehal

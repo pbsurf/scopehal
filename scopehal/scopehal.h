@@ -126,6 +126,7 @@ uint32_t GetComputeBlockCount(size_t numGlobal, size_t blockSize);
 #include "SCPISocketTransport.h"
 #include "SCPITwinLanTransport.h"
 #include "SCPILxiTransport.h"
+#include "SCPIIIOTransport.h"
 #include "SCPINullTransport.h"
 #include "SCPIUARTTransport.h"
 #include "SCPIHIDTransport.h"
