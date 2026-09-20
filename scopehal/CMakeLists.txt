@@ -178,6 +178,7 @@ set(SCOPEHAL_SOURCES
 	AseqSpectrometer.cpp
 	CopperMountainVNA.cpp
 	CSVStreamInstrument.cpp
+	DemoFunctionGenerator.cpp
 	DemoOscilloscope.cpp
 	DemoPowerSupply.cpp
 	DigilentOscilloscope.cpp

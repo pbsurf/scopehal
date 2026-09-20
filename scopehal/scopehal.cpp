@@ -44,6 +44,7 @@
 #include "AntikernelLabsILA.h"
 #include "AntikernelLabsSerdesILA8b10b.h"
 #include "AntikernelLabsVIO.h"
+#include "DemoFunctionGenerator.h"
 #include "DemoOscilloscope.h"
 #include "DemoPowerSupply.h"
 #include "DigilentOscilloscope.h"
@@ -327,6 +328,7 @@ void DriverStaticInit()
 	AddDriverClass(SocketCANAnalyzer);
 #endif
 
+	AddFunctionGeneratorDriverClass(DemoFunctionGenerator);
 	AddFunctionGeneratorDriverClass(OwonXDGFunctionGenerator);
 	AddFunctionGeneratorDriverClass(RigolFunctionGenerator);
 	AddFunctionGeneratorDriverClass(SiglentFunctionGenerator);
