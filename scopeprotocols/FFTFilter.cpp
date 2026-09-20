@@ -169,7 +169,15 @@ void FFTFilter::Refresh(vk::raii::CommandBuffer& cmdBuf, shared_ptr<QueueHandle>
 	//Force unit to uHz at this point, because legacy scopesessions with unit of Hz need to be converted
 	m_xAxisUnit = Unit(Unit::UNIT_MICROHZ);
 
+	//An empty input (e.g. a session loaded offline with no waveform data) has nothing to transform.
+	//Bail out now, since we'd never create an FFT plan for it (the size matches our initial cached value of zero)
 	const size_t npoints = din->size();
+	if(npoints == 0)
+	{
+		AddErrorMessage("Missing inputs", "Input waveform is empty");
+		SetData(nullptr, 0);
+		return;
+	}
 	LogTrace("FFTFilter: processing %zu input samples\n", npoints);
 
 	//Reallocate buffers if size has changed
