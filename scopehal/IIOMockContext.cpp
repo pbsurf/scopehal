@@ -73,6 +73,8 @@ unique_ptr<IIOContext> IIOMockContext::Create(const string& uri)
 IIOMockContext::IIOMockContext(const string& uri, const Variant& variant)
 	: m_uri(uri)
 	, m_variant(variant)
+	, m_sampleIndex(0)
+	, m_rng(0)
 {
 	m_ctxAttrs["hw_model"] = variant.hwModel;
 	m_ctxAttrs["hw_model_variant"] = "1";
@@ -355,6 +357,130 @@ bool IIOMockContext::WriteChannelAttr(
 		return false;
 	}
 	return WriteAttr(dev, id, output, attr, value);
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Streaming
+
+/**
+	@brief Simulated RF environment: frequency in Hz and amplitude as a fraction of ADC full scale
+ */
+struct MockTone
+{
+	double freq;
+	double amplitude;
+};
+
+static const MockTone g_mockTones[] =
+{
+	{ 433920000, 0.30 },
+	{ 915000000, 0.30 },
+	{ 2400500000, 0.50 },
+	{ 2412000000, 0.40 },
+	{ 2437000000, 0.30 }
+};
+
+bool IIOMockContext::CaptureBlock(
+	const string& dev,
+	const vector<string>& channels,
+	size_t depth,
+	vector<vector<int16_t> >& data)
+{
+	if(dev != g_rxData)
+	{
+		LogError("Mock IIO device \"%s\" is not capable of streaming\n", dev.c_str());
+		return false;
+	}
+
+	//Sanity check the request and figure out which RX path (0 = RX1) each channel belongs to
+	//Channels come in I/Q pairs: voltage0 = RX1 I, voltage1 = RX1 Q, voltage2 = RX2 I, ...
+	const size_t maxDepth = 16 * 1024 * 1024;
+	if( (depth == 0) || (depth > maxDepth) )
+	{
+		LogError("Invalid mock IIO buffer size %zu\n", depth);
+		return false;
+	}
+	vector<size_t> path;
+	vector<bool> isQ;
+	for(auto& name : channels)
+	{
+		unsigned int index;
+		char extra;
+		if( (1 != sscanf(name.c_str(), "voltage%u%c", &index, &extra)) || (index >= 2*m_variant.numChannels) )
+		{
+			LogError("Mock IIO device \"%s\" has no input scan element \"%s\"\n", dev.c_str(), name.c_str());
+			return false;
+		}
+		path.push_back(index / 2);
+		isQ.push_back(index & 1);
+	}
+
+	int64_t lo;
+	int64_t rate;
+	int64_t bw;
+	{
+		lock_guard<recursive_mutex> lock(m_mutex);
+		if( !ReadChannelAttrInt(g_phy, "altvoltage0", true, "frequency", lo) ||
+			!ReadChannelAttrInt(g_phy, "voltage0", false, "sampling_frequency", rate) ||
+			!ReadChannelAttrInt(g_phy, "voltage0", false, "rf_bandwidth", bw) )
+		{
+			return false;
+		}
+	}
+
+	//Take as long as a real capture would, but don't hang the caller for ages on huge captures
+	double duration = static_cast<double>(depth) / rate;
+	this_thread::sleep_for(chrono::microseconds(static_cast<int64_t>(min(duration, 2.0) * 1e6)));
+
+	uint64_t start;
+	{
+		lock_guard<recursive_mutex> lock(m_mutex);
+		start = m_sampleIndex;
+		m_sampleIndex += depth;
+	}
+
+	//Signals outside the analog filter or the Nyquist bandwidth are gone
+	double halfBand = min(bw, rate) / 2.0;
+
+	//Noise floor of a few counts
+	normal_distribution<double> noise(0, 6);
+
+	data.clear();
+	data.resize(channels.size());
+	const double twoPi = 2 * M_PI;
+	for(size_t i=0; i<channels.size(); i++)
+	{
+		//The second RX path sees a slightly weaker and phase shifted version of the same signals
+		double gain = (path[i] == 0) ? 1.0 : 0.6;
+		double phaseOffset = path[i] * M_PI / 3;
+
+		vector<double> acc(depth, 0.0);
+		for(auto& tone : g_mockTones)
+		{
+			double fbb = tone.freq - lo;
+			if(fabs(fbb) > halfBand)
+				continue;
+
+			double amp = tone.amplitude * gain * 2047;
+			for(size_t j=0; j<depth; j++)
+			{
+				double cycles = fmod(fbb * static_cast<double>(start + j) / rate, 1.0);
+				double phase = twoPi * cycles + phaseOffset;
+				acc[j] += amp * (isQ[i] ? sin(phase) : cos(phase));
+			}
+		}
+
+		auto& out = data[i];
+		out.resize(depth);
+		lock_guard<recursive_mutex> lock(m_mutex);
+		for(size_t j=0; j<depth; j++)
+		{
+			double v = acc[j] + noise(m_rng);
+			out[j] = static_cast<int16_t>(min(2047.0, max(-2048.0, round(v))));
+		}
+	}
+
+	return true;
 }
 
 #endif

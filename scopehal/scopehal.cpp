@@ -93,6 +93,7 @@
 #include "AseqSpectrometer.h"
 
 #include "UHDBridgeSDR.h"
+#include "IIOSDR.h"
 
 #include "CopperMountainVNA.h"
 #include "NanoVNA.h"
@@ -363,6 +364,9 @@ void DriverStaticInit()
 	AddSpectrometerDriverClass(AseqSpectrometer);
 
 	AddSDRDriverClass(UHDBridgeSDR);
+#ifdef HAS_IIO
+	AddSDRDriverClass(IIOSDR);
+#endif
 
 	AddVNADriverClass(CopperMountainVNA);
 	AddVNADriverClass(NanoVNA);

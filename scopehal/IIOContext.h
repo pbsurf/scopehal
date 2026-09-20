@@ -97,6 +97,26 @@ public:
 		const std::string& dev, const std::string& chan, bool output, const std::string& attr,
 		const std::string& value) =0;
 
+	/**
+		@brief Captures a block of samples from a buffer-capable device
+
+		This blocks until the samples have been received. Channels are enabled for the duration of the call and
+		then disabled again, and a fresh buffer is used each time so the data is always newly acquired.
+
+		@param dev			Device to capture from (e.g. cf-ad9361-lpc)
+		@param channels		Channel IDs to capture (e.g. voltage0, voltage1). All must be 16 bit input channels.
+		@param depth		Number of samples to capture from each channel
+		@param data			Output samples, one vector per channel in the same order as channels. These are converted
+							to host format, so for a 12 bit ADC they range from -2048 to 2047.
+
+		@return				True on success, false on failure (details are logged)
+	 */
+	virtual bool CaptureBlock(
+		const std::string& dev,
+		const std::vector<std::string>& channels,
+		size_t depth,
+		std::vector<std::vector<int16_t> >& data) =0;
+
 	//Attribute access (typed convenience wrappers)
 	bool ReadChannelAttrInt(
 		const std::string& dev, const std::string& chan, bool output, const std::string& attr, int64_t& value);

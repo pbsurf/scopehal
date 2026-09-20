@@ -240,4 +240,90 @@ bool IIOLibContext::WriteChannelAttr(
 		dev + "/" + chan + "/" + attr, value);
 }
 
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Streaming
+
+bool IIOLibContext::CaptureBlock(
+	const string& dev,
+	const vector<string>& channels,
+	size_t depth,
+	vector<vector<int16_t> >& data)
+{
+	lock_guard<recursive_mutex> lock(m_mutex);
+
+	auto d = iio_context_find_device(m_ctx, dev.c_str());
+	if(!d)
+	{
+		LogError("IIO device \"%s\" not found\n", dev.c_str());
+		return false;
+	}
+
+	//Start with everything off, then turn on only what we were asked for
+	unsigned int nchans = iio_device_get_channels_count(d);
+	for(unsigned int i=0; i<nchans; i++)
+		iio_channel_disable(iio_device_get_channel(d, i));
+
+	vector<iio_channel*> chans;
+	for(auto& name : channels)
+	{
+		auto c = iio_device_find_channel(d, name.c_str(), false);
+		if(!c || !iio_channel_is_scan_element(c))
+		{
+			LogError("IIO device \"%s\" has no input scan element \"%s\"\n", dev.c_str(), name.c_str());
+			return false;
+		}
+
+		//We only handle 16 bit samples (12 bit ADCs like the AD936x are stored in 16 bits)
+		auto fmt = iio_channel_get_data_format(c);
+		if( (fmt->length != 16) || (fmt->repeat > 1) )
+		{
+			LogError("IIO channel %s/%s has an unsupported sample format (%u bits, repeat %u)\n",
+				dev.c_str(), name.c_str(), fmt->length, fmt->repeat);
+			return false;
+		}
+
+		chans.push_back(c);
+	}
+	for(auto c : chans)
+		iio_channel_enable(c);
+
+	bool ok = false;
+	errno = 0;
+	auto buf = iio_device_create_buffer(d, depth, false);
+	if(!buf)
+		LogError("Failed to create IIO buffer for %s (%zu samples): %s\n", dev.c_str(), depth, strerror(errno));
+	else
+	{
+		auto ret = iio_buffer_refill(buf);
+		if(ret < 0)
+			LogError("Failed to read IIO buffer from %s: %s\n", dev.c_str(), strerror(-ret));
+		else
+		{
+			ok = true;
+			data.clear();
+			data.resize(chans.size());
+			for(size_t i=0; i<chans.size(); i++)
+			{
+				data[i].resize(depth);
+				size_t expected = depth * sizeof(int16_t);
+				size_t got = iio_channel_read(chans[i], buf, data[i].data(), expected);
+				if(got != expected)
+				{
+					LogError("Short read from IIO channel %s/%s (got %zu of %zu bytes)\n",
+						dev.c_str(), channels[i].c_str(), got, expected);
+					ok = false;
+					break;
+				}
+			}
+		}
+
+		iio_buffer_destroy(buf);
+	}
+
+	for(auto c : chans)
+		iio_channel_disable(c);
+
+	return ok;
+}
+
 #endif

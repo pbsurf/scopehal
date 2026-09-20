@@ -40,11 +40,16 @@
 #define IIOMockContext_h
 
 #include "IIOContext.h"
+#include <random>
 
 /**
 	@brief Simulated IIO context modeling an AD936x SDR, for development and testing without hardware
 
 	URIs: "mock:" or "mock:ad9363" (1R1T, Pluto-like), "mock:ad9361" (2R2T)
+
+	CaptureBlock() synthesizes a handful of fixed-frequency RF tones plus noise. These are simulated at their real RF
+	frequencies, so they move around or disappear as you retune the LO, change the sample rate, or narrow the RF
+	bandwidth. It also takes as long as a real capture would (up to a limit).
 
 	The attribute names, channel layout, and device names follow the Linux ad9361 driver as used by pyadi-iio.
 	Value ranges, clamping vs rejection of out-of-range writes, and default values are approximations chosen to
@@ -75,6 +80,12 @@ public:
 	virtual bool WriteChannelAttr(
 		const std::string& dev, const std::string& chan, bool output, const std::string& attr,
 		const std::string& value) override;
+
+	virtual bool CaptureBlock(
+		const std::string& dev,
+		const std::vector<std::string>& channels,
+		size_t depth,
+		std::vector<std::vector<int16_t> >& data) override;
 
 protected:
 	///@brief Model-specific parameters
@@ -120,6 +131,11 @@ protected:
 	std::map<std::string, Attr> m_attrs;
 
 	std::recursive_mutex m_mutex;
+
+	///@brief Total number of samples generated so far, used to keep the simulated signals phase continuous
+	uint64_t m_sampleIndex;
+
+	std::mt19937 m_rng;
 };
 
 #endif

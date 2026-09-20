@@ -30,66 +30,122 @@
 /**
 	@file
 	@author ngscopeclient contributors
-	@brief Declaration of IIOLibContext
+	@brief Declaration of IIOSDR
 	@ingroup sdrdrivers
  */
 
 #ifdef HAS_IIO
 
-#ifndef IIOLibContext_h
-#define IIOLibContext_h
+#ifndef IIOSDR_h
+#define IIOSDR_h
 
-#include "IIOContext.h"
-
-struct iio_context;
+#include "SCPISDR.h"
+#include "SCPIIIOTransport.h"
 
 /**
-	@brief IIOContext implementation backed by libiio (0.x API)
+	@brief IIOSDR - driver for AD936x based software defined radios (ADALM-PLUTO etc) using libiio
+
+	Currently only the receive path is supported.
+
+	Configuration changes are cached and pushed to the hardware by BackgroundProcessing(), which runs on the
+	instrument thread between acquisitions. This means the GUI thread never blocks on the radio, and never contends
+	with a capture that is in progress. The values reported by the getters are the requested settings, clamped to the
+	limits we know about, until the hardware has been updated and read back.
 
 	@ingroup sdrdrivers
  */
-class IIOLibContext : public IIOContext
+class IIOSDR
+	: public virtual SCPISDR
 {
 public:
-	virtual ~IIOLibContext();
+	IIOSDR(SCPITransport* transport);
+	virtual ~IIOSDR();
 
 	//not copyable or assignable
-	IIOLibContext(const IIOLibContext&) =delete;
-	IIOLibContext& operator=(const IIOLibContext&) =delete;
+	IIOSDR(const IIOSDR& rhs) =delete;
+	IIOSDR& operator=(const IIOSDR& rhs) =delete;
 
-	static std::unique_ptr<IIOContext> Create(const std::string& uri);
+public:
 
-	virtual std::string GetUri() override;
-	virtual std::string GetDescription() override;
-	virtual std::map<std::string, std::string> GetAttributes() override;
+	virtual void BackgroundProcessing() override;
 
-	virtual std::vector<std::string> GetDeviceNames() override;
-	virtual bool HasDevice(const std::string& dev) override;
-	virtual bool HasChannel(const std::string& dev, const std::string& chan, bool output) override;
+	//Channel configuration
+	virtual bool IsChannelEnabled(size_t i) override;
+	virtual void EnableChannel(size_t i) override;
+	virtual void DisableChannel(size_t i) override;
+	virtual OscilloscopeChannel::CouplingType GetChannelCoupling(size_t i) override;
+	virtual std::vector<OscilloscopeChannel::CouplingType> GetAvailableCouplings(size_t i) override;
 
-	virtual bool ReadDeviceAttr(const std::string& dev, const std::string& attr, std::string& value) override;
-	virtual bool WriteDeviceAttr(const std::string& dev, const std::string& attr, const std::string& value) override;
-	virtual bool ReadChannelAttr(
-		const std::string& dev, const std::string& chan, bool output, const std::string& attr,
-		std::string& value) override;
-	virtual bool WriteChannelAttr(
-		const std::string& dev, const std::string& chan, bool output, const std::string& attr,
-		const std::string& value) override;
+	//Baseband timebase
+	virtual uint64_t GetSampleRate() override;
+	virtual void SetSampleRate(uint64_t rate) override;
+	virtual uint64_t GetSampleDepth() override;
+	virtual void SetSampleDepth(uint64_t depth) override;
+	virtual std::vector<uint64_t> GetSampleRatesNonInterleaved() override;
+	virtual std::vector<uint64_t> GetSampleDepthsNonInterleaved() override;
+	virtual bool CanInterleave() override;
 
-	virtual bool CaptureBlock(
-		const std::string& dev,
-		const std::vector<std::string>& channels,
-		size_t depth,
-		std::vector<std::vector<int16_t> >& data) override;
+	//LO configuration
+	virtual void SetSpan(int64_t span) override;
+	virtual int64_t GetSpan() override;
+	virtual void SetCenterFrequency(size_t channel, int64_t freq) override;
+	virtual int64_t GetCenterFrequency(size_t channel) override;
+
+	//Instrument settings
+	virtual bool HasTimebaseControls() override;
+	virtual bool HasFrequencyControls() override;
+	virtual bool HasResolutionBandwidth() override;
+
+	//Triggering
+	virtual Oscilloscope::TriggerMode PollTrigger() override;
+	virtual bool AcquireData() override;
+	virtual void Start() override;
+	virtual void StartSingleTrigger() override;
+	virtual void Stop() override;
+	virtual void ForceTrigger() override;
+	virtual bool IsTriggerArmed() override;
+	virtual void PushTrigger() override;
+	virtual void PullTrigger() override;
+	virtual OscilloscopeChannel* GetExternalTrigger() override;
 
 protected:
-	IIOLibContext(const std::string& uri, iio_context* ctx);
+	std::string GetChannelColor(size_t i);
+	void ApplyConfiguration();
+	void ReadHardwareConfiguration();
 
-	std::string m_uri;
-	iio_context* m_ctx;
+	///@brief The IIO context (owned by the transport), or nullptr if we failed to find a supported device
+	IIOContext* m_ctx;
 
-	///@brief Serializes all access to the libiio context
-	std::recursive_mutex m_mutex;
+	///@brief Number of receive paths
+	size_t m_numRx;
+
+	//Requested configuration. Protected by m_cacheMutex
+	int64_t m_centerFreq;
+	int64_t m_span;
+	uint64_t m_sampleRate;
+	uint64_t m_sampleDepth;
+	std::vector<bool> m_channelEnabled;
+	bool m_centerFreqDirty;
+	bool m_spanDirty;
+	bool m_sampleRateDirty;
+
+	///@brief Configuration currently active in the hardware. Only touched by the instrument thread.
+	int64_t m_hwCenterFreq;
+	uint64_t m_hwSampleRate;
+
+public:
+	static std::string GetDriverNameInternal();
+
+	//This is intentionally not virtual since it's a static method used by enumeration
+	//cppcheck-suppress duplInheritedMember
+	static std::vector<SCPIInstrumentModel> GetDriverSupportedModels()
+	{
+		return {
+			{"ADALM-PLUTO", {{ SCPITransportType::TRANSPORT_IIO, "ip:192.168.2.1" }}}
+		};
+	}
+
+	SDR_INITPROC(IIOSDR)
 };
 
 #endif

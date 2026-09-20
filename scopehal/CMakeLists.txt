@@ -100,6 +100,7 @@ set(SCOPEHAL_SOURCES
 	IIOContext.cpp
 	IIOLibContext.cpp
 	IIOMockContext.cpp
+	IIOSDR.cpp
 	SCPIDevice.cpp
 
 	IBISParser.cpp
