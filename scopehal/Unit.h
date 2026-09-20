@@ -114,6 +114,9 @@ public:
 	: m_type(t)
 	{}
 
+	///@brief Most digits after the decimal point that PrettyPrintInt64() can show
+	static constexpr int MAX_INT64_DECIMALS = 18;
+
 	Unit(const std::string& rhs);
 	std::string ToString() const;
 	std::string ToStringLong() const;
@@ -121,6 +124,7 @@ public:
 	std::string PrettyPrint(double value, int sigfigs = -1, bool useDisplayLocale = true) const;
 	std::string PrettyPrintTabular(double value, int leftdigits = 4, int rightdigits = 3) const;
 	std::string PrettyPrintInt64(int64_t value, int sigfigs = -1, bool useDisplayLocale = true) const;
+	std::string PrettyPrintInt64WithResolution(int64_t value, double resolution, bool useDisplayLocale = true) const;
 
 	std::string PrettyPrintRange(double pixelMin, double pixelMax, double rangeMin, double rangeMax) const;
 

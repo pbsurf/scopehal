@@ -729,21 +729,22 @@ string Unit::PrettyPrint(double value, int sigfigs, bool useDisplayLocale) const
 					snprintf(tmp, sizeof(tmp), format.c_str(), value_rescaled, space, prefix.c_str(), suffix.c_str());
 				}
 
-				//If not a round number, add more digits (up to 5)
+				//If not a round number, add as many digits as needed to show it (up to 9)
+				//The check for "close enough to a round number" is relative to the size of the value, to ignore
+				//floating point noise (e.g. 0.1f is really 0.100000001490116) but not real differences between
+				//large values (e.g. 1.0004 GHz is not 1 GHz).
+				//For exact integer values that need more digits than this can show, use PrettyPrintInt64().
 				else
 				{
-					if( fabs(round(value_rescaled) - value_rescaled) < 0.001 )
-						snprintf(tmp, sizeof(tmp), "%.0f%s%s%s", value_rescaled, space, prefix.c_str(), suffix.c_str());
-					else if(fabs(round(value_rescaled*10) - value_rescaled*10) < 0.001)
-						snprintf(tmp, sizeof(tmp), "%.1f%s%s%s", value_rescaled, space, prefix.c_str(), suffix.c_str());
-					else if(fabs(round(value_rescaled*100) - value_rescaled*100) < 0.001 )
-						snprintf(tmp, sizeof(tmp), "%.2f%s%s%s", value_rescaled, space, prefix.c_str(), suffix.c_str());
-					else if(fabs(round(value_rescaled*1000) - value_rescaled*1000) < 0.001 )
-						snprintf(tmp, sizeof(tmp), "%.3f%s%s%s", value_rescaled, space, prefix.c_str(), suffix.c_str());
-					else if(fabs(round(value_rescaled*10000) - value_rescaled*10000) < 0.001 )
-						snprintf(tmp, sizeof(tmp), "%.4f%s%s%s", value_rescaled, space, prefix.c_str(), suffix.c_str());
-					else
-						snprintf(tmp, sizeof(tmp), "%.5f%s%s%s", value_rescaled, space, prefix.c_str(), suffix.c_str());
+					const int maxDigits = 9;
+					int digits = 0;
+					for(; digits < maxDigits; digits++)
+					{
+						double scaled = fabs(value_rescaled) * pow(10, digits);
+						if(fabs(round(scaled) - scaled) <= 1e-6 * scaled)
+							break;
+					}
+					snprintf(tmp, sizeof(tmp), "%.*f%s%s%s", digits, value_rescaled, space, prefix.c_str(), suffix.c_str());
 				}
 			}
 			break;
@@ -886,101 +887,63 @@ string Unit::PrettyPrintInt64(int64_t value, int sigfigs, bool useDisplayLocale)
 
 		default:
 			{
-				//Default if not specified is 4 sig figs
+				//Default if not specified is 4 digits after the decimal point
 				if(sigfigs < 0)
 					sigfigs = 4;
 
-				//Cap max sig figs to 9 for now
-				if(sigfigs > 9)
-					sigfigs = 9;
+				//Cap max digits so that 10^digits still fits in an int64
+				if(sigfigs > MAX_INT64_DECIMALS)
+					sigfigs = MAX_INT64_DECIMALS;
 
-				const int64_t scales[10] =
-				{
-					1LL,
-					10LL,
-					100LL,
-					1000LL,
-					10000LL,
-					100000LL,
-					1000000LL,
-					10000000LL,
-					100000000LL,
-					1000000000LL
-				};
-				int64_t digscale = scales[sigfigs];
-
-				const char* formatsDisplay[10] =
-				{
-					"%" PRId64 "%c%01" PRId64,
-					"%" PRId64 "%c%01" PRId64,
-					"%" PRId64 "%c%02" PRId64,
-					"%" PRId64 "%c%03" PRId64,
-					"%" PRId64 "%c%04" PRId64,
-					"%" PRId64 "%c%05" PRId64,
-					"%" PRId64 "%c%06" PRId64,
-					"%" PRId64 "%c%07" PRId64,
-					"%" PRId64 "%c%08" PRId64,
-					"%" PRId64 "%c%09" PRId64,
-				};
-
-				const char* formatsSerial[10] =
-				{
-					"%" PRId64 ".%01" PRId64,
-					"%" PRId64 ".%01" PRId64,
-					"%" PRId64 ".%02" PRId64,
-					"%" PRId64 ".%03" PRId64,
-					"%" PRId64 ".%04" PRId64,
-					"%" PRId64 ".%05" PRId64,
-					"%" PRId64 ".%06" PRId64,
-					"%" PRId64 ".%07" PRId64,
-					"%" PRId64 ".%08" PRId64,
-					"%" PRId64 ".%09" PRId64,
-				};
-
-				//Normal pretty printing routine for small values
-				int64_t value1;
-				int64_t value2;
-				if(divFactor < digscale)
-				{
-					value1 = value * digscale;
-					if(scaleFactor > 1)
-						value1 *= mulFactor;
-					else
-						value1 /= divFactor;
-					value2 = value1 % digscale;
-					value1 /= digscale;
-				}
-
-				//For really big values, prescale first to avoid overflow
+				//Split the magnitude into the whole part and the digits after the decimal point, exactly.
+				//The digits are truncated, not rounded, like everything else here.
+				bool negative = (value < 0);
+				uint64_t magnitude = negative ? (0 - static_cast<uint64_t>(value)) : static_cast<uint64_t>(value);
+				uint64_t whole;
+				uint64_t fraction = 0;
+				if(scaleFactor > 1)
+					whole = magnitude * mulFactor;
 				else
 				{
-					value1 = value / (divFactor / digscale);
-					value2 = value1 % digscale;
-					value1 /= digscale;
+					whole = magnitude / divFactor;
+					uint64_t remainder = magnitude % divFactor;
+
+					//Long division, one digit at a time. This can't overflow since the remainder is always less than
+					//divFactor (at most 1e15), unlike multiplying by 10^digits up front.
+					for(int i=0; i<sigfigs; i++)
+					{
+						remainder *= 10;
+						fraction = fraction*10 + (remainder / divFactor);
+						remainder %= divFactor;
+					}
 				}
 
-				//Low digits must be unsigned otherwise we get garbage like -3.-1
-				value2 = llabs(value2);
+				//Don't show a minus sign in front of zero
+				const char* sign = (negative && ( (whole != 0) || (fraction != 0) ) ) ? "-" : "";
 
-				//Use correct decimal separator for user's locale if needed
-				if(useDisplayLocale)
-					snprintf(tmp, sizeof(tmp), formatsDisplay[sigfigs], value1, m_decimalSeparator, value2);
+				if(sigfigs == 0)
+					snprintf(tmp, sizeof(tmp), "%s%" PRIu64, sign, whole);
+
 				else
-					snprintf(tmp, sizeof(tmp), formatsSerial[sigfigs], value1, value2);
-
-				//Trim zeroes at right
-				ssize_t n = strlen(tmp) - 1;
-				for(; n > 0; n--)
 				{
-					if(tmp[n] == '0')
+					//Use correct decimal separator for user's locale if needed
+					char separator = useDisplayLocale ? m_decimalSeparator : '.';
+					snprintf(tmp, sizeof(tmp), "%s%" PRIu64 "%c%0*" PRIu64, sign, whole, separator, sigfigs, fraction);
+
+					//Trim zeroes at right
+					ssize_t n = strlen(tmp) - 1;
+					for(; n > 0; n--)
+					{
+						if(tmp[n] == '0')
+							tmp[n] = '\0';
+						else
+							break;
+					}
+
+					//Trim trailing decimal point
+					if(tmp[n] == separator)
 						tmp[n] = '\0';
-					else
-						break;
 				}
-
-				//Trim trailing decimal point
-				if(tmp[n] == '.')
-					tmp[n] = '\0';
 			}
 			break;
 	}
@@ -989,6 +952,51 @@ string Unit::PrettyPrintInt64(int64_t value, int sigfigs, bool useDisplayLocale)
 	return numprefix + string(tmp) + (space_after_number ? " " : "") + prefix + suffix;
 }
 
+/**
+	@brief Prints an integer value with SI scaling factors, showing only the digits that are meaningful
+
+	This is for values that can't be known any more precisely than some resolution, such as a position picked with
+	the mouse on a plot, where adjacent pixels are a fixed distance apart. Digits below the resolution are not shown,
+	and the value is rounded to the last digit shown rather than truncated.
+
+	@param value				The value
+	@param resolution			Smallest difference that matters, in the same units as value (must be positive,
+								otherwise the value is shown as precisely as possible)
+	@param useDisplayLocale		True if the string is formatted for display (user's locale)
+								False if the string is formatted for serialization ("C" locale regardless of user pref)
+ */
+string Unit::PrettyPrintInt64WithResolution(int64_t value, double resolution, bool useDisplayLocale) const
+{
+	int digits = MAX_INT64_DECIMALS;
+
+	if( (resolution > 0) && isfinite(resolution) )
+	{
+		//Figure out how many digits after the decimal point are needed for the last one to be no larger than the
+		//resolution, so that neighboring positions are shown as different values
+		//(this must use the same scaling as PrettyPrintInt64(), including special cases for units like uHz that
+		//aren't SI base units, or the digits will be off by the difference)
+		double scaleFactor;
+		string prefix;
+		string numprefix;
+		string suffix;
+		GetSIScalingFactor(value, scaleFactor, prefix);
+		GetUnitSuffix(m_type, value, scaleFactor, prefix, numprefix, suffix);
+		double scaledResolution = resolution * scaleFactor;
+		digits = ceil(-log10(scaledResolution) - 1e-9);
+		digits = max(0, min(MAX_INT64_DECIMALS, digits));
+
+		//Round to the last digit we show, if that's a coarser step than the native resolution of the value
+		double place = pow(10, -digits) / scaleFactor;
+		if(place > 1.5)
+		{
+			int64_t step = llround(place);
+			int64_t half = step / 2;
+			value = ( (value >= 0) ? (value + half) : (value - half) ) / step * step;
+		}
+	}
+
+	return PrettyPrintInt64(value, digits, useDisplayLocale);
+}
 
 /**
 	@brief Prints a value with SI scaling factors and unnecessarily significant sub-pixel digits removed
