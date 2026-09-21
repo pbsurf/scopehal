@@ -1185,6 +1185,198 @@ string Unit::PrettyPrintRange(double pixelMin, double pixelMax, double rangeMin,
 }
 
 /**
+	@brief Increments or decrements the digit to the left of the cursor in a number being edited by the user
+
+	The text is expected to look like the output of PrettyPrint(): an optional sign, digits with an optional decimal
+	mark ("." or ","), then optionally an SI prefix and unit (for example "2.4 GHz"). Anything before or after the
+	number is preserved as-is.
+
+	This works on the digits of the text itself rather than on the value it represents. The number of decimal places,
+	prefix, and unit never change, so "999 MHz" becomes "1000 MHz", not "1 GHz", and the cursor stays put even
+	when the user holds down the key. The result can be parsed with ParseString() in the usual way.
+
+	The digit stepped is the one immediately before the cursor, so with the cursor at "2.4| GHz" the step is 0.1, with
+	"2|.4 GHz" or "2.|4 GHz" it is 1, and with "|2.4 GHz" it is 10. Carries and borrows propagate, and stepping down
+	through zero flips the sign.
+
+	If the cursor is beyond the number (for example "2.4 |GHz"), another decimal place is added and that is stepped:
+	"2.4 |GHz" becomes "2.41| GHz" going up or "2.39| GHz" going down, with the cursor just after the new digit so that
+	repeated steps keep changing the same place.
+
+	@param text			Text being edited
+	@param cursor		Cursor position, as a byte offset into text
+	@param increment	True to add one to the digit, false to subtract one
+	@param newText		Text after stepping
+	@param newCursor	Cursor position after stepping, adjusted for any digits or sign that were added or removed
+
+	@return				True if a number was found and stepped. If false, newText and newCursor are not modified.
+ */
+bool Unit::StepNumericText(const string& text, int cursor, bool increment, string& newText, int& newCursor)
+{
+	size_t n = text.size();
+
+	//Find the number: optional sign, then digits with at most one decimal mark
+	size_t i = 0;
+	while( (i < n) && isspace(static_cast<unsigned char>(text[i])) )
+		i ++;
+	size_t signPos = i;
+	bool negative = false;
+	bool explicitPlus = false;
+	if( (i < n) && ( (text[i] == '-') || (text[i] == '+') ) )
+	{
+		negative = (text[i] == '-');
+		explicitPlus = !negative;
+		i ++;
+	}
+	size_t digitsStart = i;
+	size_t mark = string::npos;
+	while(i < n)
+	{
+		char c = text[i];
+		if(isdigit(static_cast<unsigned char>(c)))
+			i ++;
+		else if( ( (c == '.') || (c == ',') ) && (mark == string::npos) )
+		{
+			mark = i;
+			i ++;
+		}
+		else
+			break;
+	}
+	size_t numEnd = i;
+
+	int intDigits = static_cast<int>( ((mark == string::npos) ? numEnd : mark) - digitsStart );
+	int fracDigits = (mark == string::npos) ? 0 : static_cast<int>(numEnd - mark - 1);
+	if(intDigits + fracDigits == 0)
+		return false;
+
+	//If the cursor is beyond the number, add another decimal place and step that one. The cursor ends up right after the
+	//new digit, so this can only recurse once.
+	if(cursor > static_cast<int>(numEnd))
+	{
+		string widened = text.substr(0, numEnd);
+
+		//Use the same decimal mark if we already have one, otherwise the one for the user's locale
+		if(mark == string::npos)
+			widened += m_decimalSeparator;
+		widened += '0';
+		int widenedCursor = static_cast<int>(widened.size());
+		widened += text.substr(numEnd);
+
+		return StepNumericText(widened, widenedCursor, increment, newText, newCursor);
+	}
+
+	//Work out which digit we're stepping. Cursor is relative to the first digit.
+	int rel = min(max(cursor, static_cast<int>(digitsStart)), static_cast<int>(numEnd)) - static_cast<int>(digitsStart);
+	int exponent;
+	if( (mark != string::npos) && (rel > intDigits) )
+	{
+		//After the decimal mark. Right after the mark itself is the ones digit, otherwise count fractional digits.
+		exponent = (rel == intDigits + 1) ? 0 : -(rel - intDigits - 1);
+	}
+	else
+		exponent = intDigits - rel;
+
+	//Digits of the magnitude, least significant first. Leave room for the digit we're stepping and for a carry.
+	vector<int> d;
+	for(size_t j=numEnd; j>digitsStart; j--)
+	{
+		if(isdigit(static_cast<unsigned char>(text[j-1])))
+			d.push_back(text[j-1] - '0');
+	}
+	size_t pos = exponent + fracDigits;
+	if(d.size() < pos + 1)
+		d.resize(pos + 1, 0);
+	d.push_back(0);
+
+	auto isZero = [&]()
+	{
+		for(auto x : d)
+		{
+			if(x != 0)
+				return false;
+		}
+		return true;
+	};
+
+	//Adding to a negative number subtracts from its magnitude and vice versa
+	if(increment != negative)
+	{
+		size_t j = pos;
+		while(d[j] == 9)
+		{
+			d[j] = 0;
+			j ++;
+		}
+		d[j] ++;
+	}
+	else
+	{
+		//Is the magnitude at least the step? If any digit at or above the stepped one is nonzero, it is.
+		bool enough = false;
+		for(size_t j=pos; j<d.size(); j++)
+		{
+			if(d[j] != 0)
+				enough = true;
+		}
+
+		if(enough)
+		{
+			size_t j = pos;
+			while(d[j] == 0)
+			{
+				d[j] = 9;
+				j ++;
+			}
+			d[j] --;
+		}
+
+		//Going through zero: the result is the step minus the magnitude, with the opposite sign
+		else
+		{
+			int borrow = 0;
+			for(size_t j=0; j<d.size(); j++)
+			{
+				int minuend = (j == pos) ? 1 : 0;
+				int v = minuend - d[j] - borrow;
+				borrow = (v < 0) ? 1 : 0;
+				d[j] = (v + 10) % 10;
+			}
+			negative = !negative;
+		}
+	}
+	if(isZero())
+		negative = false;
+
+	//Put the number back together. Keep the same number of decimal places and at least one integer digit.
+	size_t top = d.size();
+	while( (top > static_cast<size_t>(fracDigits) + 1) && (d[top-1] == 0) )
+		top --;
+
+	string number;
+	if(negative)
+		number += '-';
+	else if(explicitPlus)
+		number += '+';
+	for(size_t j=top; j>0; j--)
+	{
+		number += static_cast<char>('0' + d[j-1]);
+		if( (mark != string::npos) && (j-1 == static_cast<size_t>(fracDigits)) )
+			number += text[mark];
+	}
+
+	newText = text.substr(0, signPos) + number + text.substr(numEnd);
+
+	//Keep the cursor next to the same digit. Anything added or removed to the left of it moves it too.
+	newCursor = cursor;
+	if(cursor >= static_cast<int>(digitsStart))
+		newCursor += static_cast<int>(newText.size()) - static_cast<int>(n);
+	newCursor = min(max(newCursor, 0), static_cast<int>(newText.size()));
+
+	return true;
+}
+
+/**
 	@brief Parses a string based on the supplied unit
 
 	@param str					The string to parse

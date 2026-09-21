@@ -134,6 +134,13 @@ public:
 	UnitType GetType()
 	{ return m_type; }
 
+	static bool StepNumericText(
+		const std::string& text,
+		int cursor,
+		bool increment,
+		std::string& newText,
+		int& newCursor);
+
 	bool operator==(const Unit& rhs)
 	{ return m_type == rhs.m_type; }
 
