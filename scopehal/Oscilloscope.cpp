@@ -521,7 +521,13 @@ void Oscilloscope::DoLoadConfiguration(int version, const YAML::Node& node, IDTa
 			{
 				auto stype = chan->GetType(0);
 
-				chan->ClearStreams();
+				//If the channel already has the right streams (it's part of a live instrument, whose driver knows
+				//what it has) leave them alone. We don't save the type of each stream, so rebuilding them would make
+				//everything the same type as the first one, which is wrong for something like the center frequency
+				//scalar of a complex channel.
+				bool rebuild = (chan->GetStreamCount() != nstreams);
+				if(rebuild)
+					chan->ClearStreams();
 
 				//We have to keep track of indexes because streams might show up out of order
 				//but right now OscilloscopeChannel only lets us add them in order
@@ -545,8 +551,11 @@ void Oscilloscope::DoLoadConfiguration(int version, const YAML::Node& node, IDTa
 						chan->SetOffset(st.second["offset"].as<float>(), index);
 				}
 
-				for(size_t j=0; j<nstreams; j++)
-					chan->AddStream(yunit, names[j], stype);
+				if(rebuild)
+				{
+					for(size_t j=0; j<nstreams; j++)
+						chan->AddStream(yunit, names[j], stype);
+				}
 			}
 		}
 
