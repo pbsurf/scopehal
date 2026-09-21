@@ -96,7 +96,10 @@ IIOMockContext::IIOMockContext(const string& uri, const Variant& variant)
 			AddAttr(g_phy, id, output, "rf_port_select", output ? "A" : "A_BALANCED");
 
 			if(output)
+			{
 				AddAttr(g_phy, id, output, "hardwaregain", "-10.000000 dB");
+				AddAttr(g_phy, id, output, "hardwaregain_available", "[-89.75 0.25 0]", false);
+			}
 			else
 			{
 				AddAttr(g_phy, id, output, "hardwaregain", "71.000000 dB");
@@ -377,6 +380,10 @@ bool IIOMockContext::WriteAttr(
 			LogError("Failed to write IIO attribute %s = \"%s\": %s\n", what.c_str(), value.c_str(), strerror(EINVAL));
 			return false;
 		}
+
+		//The transmit attenuation is in steps of 0.25 dB
+		if(output)
+			v = round(v * 4) / 4;
 
 		char tmp[64];
 		snprintf(tmp, sizeof(tmp), "%.6f dB", v);

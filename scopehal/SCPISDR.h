@@ -161,6 +161,15 @@ public:
 	///@brief Gets the range of allowed tone frequencies, in Hz, as (min, max)
 	virtual std::pair<int64_t, int64_t> GetTxToneFrequencyRange(size_t tx);
 
+	///@brief Gets the attenuation of a transmit path, in dB. This is positive, more attenuation means less output power.
+	virtual float GetTxAttenuation(size_t tx);
+
+	///@brief Sets the attenuation of a transmit path, in dB
+	virtual void SetTxAttenuation(size_t tx, float atten);
+
+	///@brief Gets the range of allowed transmit attenuation values, in dB, as (min, max)
+	virtual std::pair<float, float> GetTxAttenuationRange(size_t tx);
+
 	///@brief Gets the amplitude of a tone, as a fraction of full scale (0 to 1)
 	virtual float GetTxToneAmplitude(size_t tx, size_t tone);
 

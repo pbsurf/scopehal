@@ -335,6 +335,21 @@ pair<int64_t, int64_t> SCPISDR::GetTxToneFrequencyRange(size_t /*tx*/)
 	return pair<int64_t, int64_t>(0, 0);
 }
 
+float SCPISDR::GetTxAttenuation(size_t /*tx*/)
+{
+	return 0;
+}
+
+void SCPISDR::SetTxAttenuation(size_t /*tx*/, float /*atten*/)
+{
+	//no-op
+}
+
+pair<float, float> SCPISDR::GetTxAttenuationRange(size_t /*tx*/)
+{
+	return pair<float, float>(0, 0);
+}
+
 float SCPISDR::GetTxToneAmplitude(size_t /*tx*/, size_t /*tone*/)
 {
 	return 0;
@@ -362,6 +377,7 @@ void SCPISDR::DoSerializeConfiguration(YAML::Node& node, IDTable& /*table*/)
 		for(size_t i=0; i<ntx; i++)
 		{
 			YAML::Node txnode;
+			txnode["attenuation"] = GetTxAttenuation(i);
 			for(size_t j=0; j<GetTxToneCount(i); j++)
 			{
 				YAML::Node tone;
@@ -412,6 +428,9 @@ void SCPISDR::DoLoadConfiguration(int /*version*/, const YAML::Node& node, IDTab
 			auto txnode = tx["tx" + to_string(i)];
 			if(!txnode)
 				continue;
+
+			if(txnode["attenuation"])
+				SetTxAttenuation(i, txnode["attenuation"].as<float>());
 
 			for(size_t j=0; j<GetTxToneCount(i); j++)
 			{

@@ -78,6 +78,8 @@ IIOSDR::IIOSDR(SCPITransport* transport)
 	, m_sampleRateDirty(false)
 	, m_numTx(0)
 	, m_numTones(0)
+	, m_txMinAtten(0)
+	, m_txMaxAtten(89.75)
 	, m_txLoFreq(2400000000)
 	, m_txLoDirty(false)
 	, m_txLoMin(70000000)
@@ -294,6 +296,8 @@ void IIOSDR::DetectTransmitter()
 
 	TxTone off = { false, 0, 0, false };
 	m_txTones.assign(m_numTx, vector<TxTone>(m_numTones, off));
+	m_txAtten.assign(m_numTx, 0);
+	m_txAttenDirty.assign(m_numTx, false);
 
 	for(size_t i=0; i<m_numTx; i++)
 	{
@@ -317,6 +321,13 @@ void IIOSDR::DetectTransmitter()
 		m_txLoMax = hi;
 	}
 	m_txMaxToneFreq = m_sampleRate / 2;
+
+	//The radio calls this a gain, but it's an attenuation so the range is negative
+	if(ReadRange(m_ctx, g_phyDevice, "voltage0", true, "hardwaregain_available", lo, hi))
+	{
+		m_txMinAtten = -hi;
+		m_txMaxAtten = -lo;
+	}
 }
 
 /**
@@ -439,6 +450,11 @@ void IIOSDR::ReadHardwareConfiguration()
 
 		for(size_t i=0; i<m_numTx; i++)
 		{
+			double gain;
+			if(m_ctx->ReadChannelAttrDouble(g_phyDevice, "voltage" + to_string(i), true, "hardwaregain", gain))
+				m_txAtten[i] = -gain;
+			m_txAttenDirty[i] = false;
+
 			for(size_t j=0; j<m_numTones; j++)
 			{
 				TxTone tone;
@@ -486,6 +502,8 @@ void IIOSDR::ApplyConfiguration()
 	int64_t txLo = 0;
 	vector<pair<size_t, size_t> > txPending;
 	vector<TxTone> txPendingTones;
+	vector<float> txAtten(m_numTx);
+	vector<bool> doTxAtten(m_numTx);
 	bool any;
 	{
 		lock_guard<recursive_mutex> lock(m_cacheMutex);
@@ -523,6 +541,11 @@ void IIOSDR::ApplyConfiguration()
 
 		for(size_t i=0; i<m_numTx; i++)
 		{
+			txAtten[i] = m_txAtten[i];
+			doTxAtten[i] = m_txAttenDirty[i];
+			m_txAttenDirty[i] = false;
+			any |= doTxAtten[i];
+
 			for(size_t j=0; j<m_numTones; j++)
 			{
 				if(!m_txTones[i][j].dirty)
@@ -549,6 +572,11 @@ void IIOSDR::ApplyConfiguration()
 		m_ctx->WriteChannelAttrInt(g_phyDevice, "altvoltage0", true, "frequency", freq);
 	if(doTxLo)
 		m_ctx->WriteChannelAttrInt(g_phyDevice, "altvoltage1", true, "frequency", txLo);
+	for(size_t i=0; i<m_numTx; i++)
+	{
+		if(doTxAtten[i])
+			m_ctx->WriteChannelAttrDouble(g_phyDevice, "voltage" + to_string(i), true, "hardwaregain", -txAtten[i]);
+	}
 
 	//The transmit sample rate follows the receive rate, and tones can't be faster than half of it
 	int64_t maxTone = 0;
@@ -598,6 +626,13 @@ void IIOSDR::ApplyConfiguration()
 
 	int64_t hwTxLo = 0;
 	bool haveTxLo = (m_numTx > 0) && m_ctx->ReadChannelAttrInt(g_phyDevice, "altvoltage1", true, "frequency", hwTxLo);
+	vector<double> hwTxGain(m_numTx);
+	vector<bool> haveTxGain(m_numTx);
+	for(size_t i=0; i<m_numTx; i++)
+	{
+		haveTxGain[i] = doTxAtten[i] &&
+			m_ctx->ReadChannelAttrDouble(g_phyDevice, "voltage" + to_string(i), true, "hardwaregain", hwTxGain[i]);
+	}
 	vector<TxTone> hwTones(txPending.size());
 	vector<bool> haveTones(txPending.size());
 	for(size_t n=0; n<txPending.size(); n++)
@@ -633,6 +668,13 @@ void IIOSDR::ApplyConfiguration()
 		m_txMaxToneFreq = maxTone;
 		if(haveTxLo && !m_txLoDirty)
 			m_txLoFreq = hwTxLo;
+
+		//The radio may have rounded the attenuation
+		for(size_t i=0; i<m_numTx; i++)
+		{
+			if(haveTxGain[i] && !m_txAttenDirty[i])
+				m_txAtten[i] = -hwTxGain[i];
+		}
 
 		//The DDS may not be able to do exactly what we asked for
 		for(size_t n=0; n<txPending.size(); n++)
@@ -868,6 +910,30 @@ pair<int64_t, int64_t> IIOSDR::GetTxToneFrequencyRange(size_t /*tx*/)
 	lock_guard<recursive_mutex> lock(m_cacheMutex);
 	int64_t limit = m_sampleRateDirty ? static_cast<int64_t>(m_sampleRate / 2) : m_txMaxToneFreq;
 	return pair<int64_t, int64_t>(-limit, limit);
+}
+
+float IIOSDR::GetTxAttenuation(size_t tx)
+{
+	if(tx >= m_numTx)
+		return 0;
+
+	lock_guard<recursive_mutex> lock(m_cacheMutex);
+	return m_txAtten[tx];
+}
+
+void IIOSDR::SetTxAttenuation(size_t tx, float atten)
+{
+	if(tx >= m_numTx)
+		return;
+
+	lock_guard<recursive_mutex> lock(m_cacheMutex);
+	m_txAtten[tx] = min(max(atten, m_txMinAtten), m_txMaxAtten);
+	m_txAttenDirty[tx] = true;
+}
+
+pair<float, float> IIOSDR::GetTxAttenuationRange(size_t /*tx*/)
+{
+	return pair<float, float>(m_txMinAtten, m_txMaxAtten);
 }
 
 float IIOSDR::GetTxToneAmplitude(size_t tx, size_t tone)

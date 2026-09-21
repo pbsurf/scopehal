@@ -113,6 +113,9 @@ public:
 	virtual int64_t GetTxToneFrequency(size_t tx, size_t tone) override;
 	virtual void SetTxToneFrequency(size_t tx, size_t tone, int64_t freq) override;
 	virtual std::pair<int64_t, int64_t> GetTxToneFrequencyRange(size_t tx) override;
+	virtual float GetTxAttenuation(size_t tx) override;
+	virtual void SetTxAttenuation(size_t tx, float atten) override;
+	virtual std::pair<float, float> GetTxAttenuationRange(size_t tx) override;
 	virtual float GetTxToneAmplitude(size_t tx, size_t tone) override;
 	virtual void SetTxToneAmplitude(size_t tx, size_t tone, float amplitude) override;
 
@@ -199,6 +202,15 @@ protected:
 
 	///@brief Tone configuration, indexed by [transmit path][tone]. Protected by m_cacheMutex
 	std::vector<std::vector<TxTone> > m_txTones;
+
+	///@brief Attenuation of each transmit path in dB, and whether it needs to be sent to the radio.
+	///Protected by m_cacheMutex
+	std::vector<float> m_txAtten;
+	std::vector<bool> m_txAttenDirty;
+
+	///@brief Range of transmit attenuation in dB. Set at startup and never changes.
+	float m_txMinAtten;
+	float m_txMaxAtten;
 
 	///@brief TX LO frequency and range. Protected by m_cacheMutex
 	int64_t m_txLoFreq;
