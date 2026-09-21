@@ -45,7 +45,8 @@
 /**
 	@brief IIOSDR - driver for AD936x based software defined radios (ADALM-PLUTO etc) using libiio
 
-	Currently only the receive path is supported.
+	The receive paths are ComplexChannels streaming I/Q samples. If the radio has the usual DDS core in the FPGA, each
+	transmit path is also exposed as an SDRTransmitChannel which can generate up to two tones.
 
 	Configuration changes are cached and pushed to the hardware by BackgroundProcessing(), which runs on the
 	instrument thread between acquisitions. This means the GUI thread never blocks on the radio, and never contends
@@ -101,6 +102,20 @@ public:
 	virtual float GetGain(size_t i) override;
 	virtual void SetGain(size_t i, float gain) override;
 
+	//Transmit control
+	virtual size_t GetTxChannelCount() override;
+	virtual size_t GetTxToneCount(size_t tx) override;
+	virtual int64_t GetTxLOFrequency() override;
+	virtual void SetTxLOFrequency(int64_t freq) override;
+	virtual std::pair<int64_t, int64_t> GetTxLOFrequencyRange() override;
+	virtual bool IsTxToneEnabled(size_t tx, size_t tone) override;
+	virtual void SetTxToneEnabled(size_t tx, size_t tone, bool enabled) override;
+	virtual int64_t GetTxToneFrequency(size_t tx, size_t tone) override;
+	virtual void SetTxToneFrequency(size_t tx, size_t tone, int64_t freq) override;
+	virtual std::pair<int64_t, int64_t> GetTxToneFrequencyRange(size_t tx) override;
+	virtual float GetTxToneAmplitude(size_t tx, size_t tone) override;
+	virtual void SetTxToneAmplitude(size_t tx, size_t tone, float amplitude) override;
+
 	//Instrument settings
 	virtual bool HasTimebaseControls() override;
 	virtual bool HasFrequencyControls() override;
@@ -132,10 +147,29 @@ protected:
 		float maxGain;
 	};
 
+	///@brief Configuration of one tone from a DDS
+	struct TxTone
+	{
+		bool enabled;
+
+		///@brief Frequency relative to the TX LO in Hz, negative if below the LO
+		int64_t freq;
+
+		///@brief Amplitude as a fraction of full scale
+		float amplitude;
+
+		///@brief True if we have a change that hasn't been sent to the radio yet
+		bool dirty;
+	};
+
 	std::string GetChannelColor(size_t i);
 	void DetectLimits();
+	void DetectTransmitter();
 	void ApplyConfiguration();
 	void ReadHardwareConfiguration();
+	bool ReadTone(size_t tx, size_t tone, TxTone& out);
+	void WriteTone(size_t tx, size_t tone, const TxTone& in);
+	std::string GetToneChannelName(size_t tx, size_t tone, bool q);
 
 	///@brief The IIO context (owned by the transport), or nullptr if we failed to find a supported device
 	IIOContext* m_ctx;
@@ -156,6 +190,24 @@ protected:
 	bool m_centerFreqDirty;
 	bool m_spanDirty;
 	bool m_sampleRateDirty;
+
+	///@brief Number of transmit paths with a DDS (zero if the radio doesn't have one)
+	size_t m_numTx;
+
+	///@brief Number of tones per transmit path
+	size_t m_numTones;
+
+	///@brief Tone configuration, indexed by [transmit path][tone]. Protected by m_cacheMutex
+	std::vector<std::vector<TxTone> > m_txTones;
+
+	///@brief TX LO frequency and range. Protected by m_cacheMutex
+	int64_t m_txLoFreq;
+	bool m_txLoDirty;
+	int64_t m_txLoMin;
+	int64_t m_txLoMax;
+
+	///@brief Largest tone frequency (half the transmit sample rate). Protected by m_cacheMutex
+	int64_t m_txMaxToneFreq;
 
 	///@brief Supported gain control modes (same for all channels)
 	std::vector<std::string> m_gainModes;

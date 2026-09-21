@@ -202,8 +202,12 @@ unsigned int SCPISDR::GetInstrumentTypes() const
 	return Instrument::INST_OSCILLOSCOPE;
 }
 
-uint32_t SCPISDR::GetInstrumentTypesForChannel(size_t /*i*/) const
+uint32_t SCPISDR::GetInstrumentTypesForChannel(size_t i) const
 {
+	//Transmit paths aren't oscilloscope inputs
+	if( (i < m_channels.size()) && (dynamic_cast<SDRTransmitChannel*>(m_channels[i]) != nullptr) )
+		return Instrument::INST_RF_GEN;
+
 	return Instrument::INST_OSCILLOSCOPE;
 }
 
@@ -279,6 +283,69 @@ void SCPISDR::SetGain(size_t /*i*/, float /*gain*/)
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Transmit control (default is no transmitter)
+
+size_t SCPISDR::GetTxChannelCount()
+{
+	return 0;
+}
+
+size_t SCPISDR::GetTxToneCount(size_t /*tx*/)
+{
+	return 0;
+}
+
+int64_t SCPISDR::GetTxLOFrequency()
+{
+	return 0;
+}
+
+void SCPISDR::SetTxLOFrequency(int64_t /*freq*/)
+{
+	//no-op
+}
+
+pair<int64_t, int64_t> SCPISDR::GetTxLOFrequencyRange()
+{
+	return pair<int64_t, int64_t>(0, 0);
+}
+
+bool SCPISDR::IsTxToneEnabled(size_t /*tx*/, size_t /*tone*/)
+{
+	return false;
+}
+
+void SCPISDR::SetTxToneEnabled(size_t /*tx*/, size_t /*tone*/, bool /*enabled*/)
+{
+	//no-op
+}
+
+int64_t SCPISDR::GetTxToneFrequency(size_t /*tx*/, size_t /*tone*/)
+{
+	return 0;
+}
+
+void SCPISDR::SetTxToneFrequency(size_t /*tx*/, size_t /*tone*/, int64_t /*freq*/)
+{
+	//no-op
+}
+
+pair<int64_t, int64_t> SCPISDR::GetTxToneFrequencyRange(size_t /*tx*/)
+{
+	return pair<int64_t, int64_t>(0, 0);
+}
+
+float SCPISDR::GetTxToneAmplitude(size_t /*tx*/, size_t /*tone*/)
+{
+	return 0;
+}
+
+void SCPISDR::SetTxToneAmplitude(size_t /*tx*/, size_t /*tone*/, float /*amplitude*/)
+{
+	//no-op
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Serialization
 
 //TODO Implement SCPISDR serialization
@@ -286,6 +353,28 @@ void SCPISDR::SetGain(size_t /*i*/, float /*gain*/)
 //cppcheck-suppress duplInheritedMember
 void SCPISDR::DoSerializeConfiguration(YAML::Node& node, IDTable& /*table*/)
 {
+	//Transmitter (not tied to channel nodes since transmit paths aren't oscilloscope channels)
+	size_t ntx = GetTxChannelCount();
+	if(ntx > 0)
+	{
+		YAML::Node tx;
+		tx["lo"] = GetTxLOFrequency();
+		for(size_t i=0; i<ntx; i++)
+		{
+			YAML::Node txnode;
+			for(size_t j=0; j<GetTxToneCount(i); j++)
+			{
+				YAML::Node tone;
+				tone["enabled"] = IsTxToneEnabled(i, j);
+				tone["freq"] = GetTxToneFrequency(i, j);
+				tone["amplitude"] = GetTxToneAmplitude(i, j);
+				txnode["tone" + to_string(j)] = tone;
+			}
+			tx["tx" + to_string(i)] = txnode;
+		}
+		node["tx"] = tx;
+	}
+
 	//Channel nodes themselves are created by Oscilloscope, we just add the SDR specific settings
 	YAML::Node channels = node["channels"];
 	for(size_t i=0; i<GetChannelCount(); i++)
@@ -309,6 +398,36 @@ void SCPISDR::DoLoadConfiguration(int /*version*/, const YAML::Node& node, IDTab
 	//Oscilloscope saves the span, but doesn't restore it
 	if(HasFrequencyControls() && node["span"])
 		SetSpan(node["span"].as<int64_t>());
+
+	//Transmitter
+	auto tx = node["tx"];
+	size_t ntx = GetTxChannelCount();
+	if(tx && (ntx > 0))
+	{
+		if(tx["lo"])
+			SetTxLOFrequency(tx["lo"].as<int64_t>());
+
+		for(size_t i=0; i<ntx; i++)
+		{
+			auto txnode = tx["tx" + to_string(i)];
+			if(!txnode)
+				continue;
+
+			for(size_t j=0; j<GetTxToneCount(i); j++)
+			{
+				auto tone = txnode["tone" + to_string(j)];
+				if(!tone)
+					continue;
+
+				if(tone["freq"])
+					SetTxToneFrequency(i, j, tone["freq"].as<int64_t>());
+				if(tone["amplitude"])
+					SetTxToneAmplitude(i, j, tone["amplitude"].as<float>());
+				if(tone["enabled"])
+					SetTxToneEnabled(i, j, tone["enabled"].as<bool>());
+			}
+		}
+	}
 
 	auto channels = node["channels"];
 	if(!channels)

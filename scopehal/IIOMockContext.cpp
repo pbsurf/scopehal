@@ -129,6 +129,27 @@ IIOMockContext::IIOMockContext(const string& uri, const Variant& variant)
 	AddChannel(g_phy, false, "temp0");
 	AddAttr(g_phy, "temp0", false, "input", "45000", false);
 
+	//DDS core. Every transmit path has two tones, each of which is a pair of DDSs (one for I and one for Q)
+	for(size_t n=0; n<variant.numChannels; n++)
+	{
+		size_t k = n * 4;
+		for(char iq : { 'I', 'Q' })
+		{
+			for(size_t f=1; f<=2; f++)
+			{
+				string id = string("altvoltage") + to_string(k ++);
+				string name = string("TX") + to_string(n+1) + "_" + iq + "_F" + to_string(f);
+				AddChannel(g_txData, true, id, name);
+
+				//F1 is running by default like it is in the stock firmware, F2 is off
+				AddAttr(g_txData, id, true, "frequency", "1000000");
+				AddAttr(g_txData, id, true, "scale", f == 1 ? "0.250000" : "0.000000");
+				AddAttr(g_txData, id, true, "phase", iq == 'I' ? "90000" : "0");
+				AddAttr(g_txData, id, true, "raw", f == 1 ? "1" : "0");
+			}
+		}
+	}
+
 	//TODO: streaming channels and buffers on the data devices (cf-ad9361-lpc / cf-ad9361-dds-core-lpc)
 }
 
@@ -246,6 +267,41 @@ bool IIOMockContext::WriteAttr(
 	{
 		LogError("Failed to write IIO attribute %s: %s\n", what.c_str(), strerror(EACCES));
 		return false;
+	}
+
+	//DDS core: frequency is limited to half of the transmit sample rate, scale is a fraction of full scale
+	if(dev == g_txData)
+	{
+		char* end = nullptr;
+		double v = strtod(value.c_str(), &end);
+		double hi;
+		if(attr == "frequency")
+		{
+			string rate;
+			hi = ReadAttr(g_phy, "voltage0", true, "sampling_frequency", rate) ? strtod(rate.c_str(), nullptr) / 2 : 0;
+		}
+		else if(attr == "scale")
+			hi = 1;
+		else if(attr == "phase")
+			hi = 360000;
+		else if(attr == "raw")
+			hi = 1;
+		else
+			hi = -1;
+
+		if( (hi < 0) || (end == value.c_str()) || (v < 0) || (v > hi) )
+		{
+			LogError("Failed to write IIO attribute %s = \"%s\": %s\n", what.c_str(), value.c_str(), strerror(EINVAL));
+			return false;
+		}
+
+		char tmp[64];
+		if(attr == "scale")
+			snprintf(tmp, sizeof(tmp), "%.6f", v);
+		else
+			snprintf(tmp, sizeof(tmp), "%" PRId64, static_cast<int64_t>(v));
+		it->second.value = tmp;
+		return true;
 	}
 
 	//Numeric attributes: parse and apply range rules

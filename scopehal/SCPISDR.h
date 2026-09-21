@@ -36,6 +36,8 @@
 #ifndef SCPISDR_h
 #define SCPISDR_h
 
+#include "SDRTransmitChannel.h"
+
 /**
 	@brief Generic representation of an optical (UV-VIS-IR) spectrometer
  */
@@ -117,6 +119,53 @@ public:
 
 	///@brief Sets the gain, in dB
 	virtual void SetGain(size_t i, float gain);
+
+	////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+	// Transmit control
+	//
+	// Drivers for radios that can transmit override these. The defaults describe a receive-only radio.
+	//
+	// The transmit paths are SDRTransmitChannel objects at the end of the channel list. They are numbered separately
+	// from the channels (the first transmit path is transmit index 0 whatever its channel index is).
+	//
+	// Each transmit path can generate a small number of tones (for example with a DDS core in the FPGA), which are
+	// complex sinusoids at a frequency relative to the transmit local oscillator.
+
+	///@brief Gets the number of transmit paths
+	virtual size_t GetTxChannelCount();
+
+	///@brief Gets the number of tones each transmit path can generate
+	virtual size_t GetTxToneCount(size_t tx);
+
+	///@brief Gets the local oscillator frequency shared by the transmit paths, in Hz
+	virtual int64_t GetTxLOFrequency();
+
+	///@brief Sets the local oscillator frequency shared by the transmit paths, in Hz
+	virtual void SetTxLOFrequency(int64_t freq);
+
+	///@brief Gets the range of allowed transmit local oscillator frequencies, in Hz, as (min, max)
+	virtual std::pair<int64_t, int64_t> GetTxLOFrequencyRange();
+
+	///@brief Returns true if a tone is being generated
+	virtual bool IsTxToneEnabled(size_t tx, size_t tone);
+
+	///@brief Turns a tone on or off
+	virtual void SetTxToneEnabled(size_t tx, size_t tone, bool enabled);
+
+	///@brief Gets the frequency of a tone relative to the transmit LO, in Hz. Negative is below the LO.
+	virtual int64_t GetTxToneFrequency(size_t tx, size_t tone);
+
+	///@brief Sets the frequency of a tone relative to the transmit LO, in Hz
+	virtual void SetTxToneFrequency(size_t tx, size_t tone, int64_t freq);
+
+	///@brief Gets the range of allowed tone frequencies, in Hz, as (min, max)
+	virtual std::pair<int64_t, int64_t> GetTxToneFrequencyRange(size_t tx);
+
+	///@brief Gets the amplitude of a tone, as a fraction of full scale (0 to 1)
+	virtual float GetTxToneAmplitude(size_t tx, size_t tone);
+
+	///@brief Sets the amplitude of a tone, as a fraction of full scale (0 to 1)
+	virtual void SetTxToneAmplitude(size_t tx, size_t tone, float amplitude);
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 	// Configuration storage

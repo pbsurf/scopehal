@@ -47,6 +47,11 @@ using namespace std;
 //Names of the IIO devices in the Linux ad9361 driver stack
 static const char* g_phyDevice = "ad9361-phy";
 static const char* g_rxDevice = "cf-ad9361-lpc";
+static const char* g_ddsDevice = "cf-ad9361-dds-core-lpc";
+
+//Maximum number of transmit paths (AD9361) and tones per path (each is a complex tone made from a pair of DDSs)
+static const size_t g_maxTx = 2;
+static const size_t g_maxTones = 2;
 
 //Full scale of the 12 bit ADC (sign extended into 16 bits by libiio)
 static const float g_adcScale = 1.0f / 2048;
@@ -71,6 +76,13 @@ IIOSDR::IIOSDR(SCPITransport* transport)
 	, m_centerFreqDirty(false)
 	, m_spanDirty(false)
 	, m_sampleRateDirty(false)
+	, m_numTx(0)
+	, m_numTones(0)
+	, m_txLoFreq(2400000000)
+	, m_txLoDirty(false)
+	, m_txLoMin(70000000)
+	, m_txLoMax(6000000000)
+	, m_txMaxToneFreq(0)
 	, m_hwCenterFreq(m_centerFreq)
 	, m_hwSampleRate(m_sampleRate)
 {
@@ -128,11 +140,15 @@ IIOSDR::IIOSDR(SCPITransport* transport)
 	m_gainModeDirty.resize(m_numRx, false);
 
 	DetectLimits();
+	DetectTransmitter();
 
 	//Adopt whatever the radio is currently doing rather than stomping on it
 	ReadHardwareConfiguration();
 	LogDebug("IIO SDR has %zu receive path(s), LO %" PRId64 " Hz, rate %" PRIu64 " Hz, bandwidth %" PRId64 " Hz\n",
 		m_numRx, m_centerFreq, m_sampleRate, m_span);
+	if(m_numTx > 0)
+		LogDebug("IIO SDR has %zu transmit path(s) with %zu tone(s) each, LO %" PRId64 " Hz\n",
+			m_numTx, m_numTones, m_txLoFreq);
 	LogDebug("Limits: LO %" PRId64 " - %" PRId64 " Hz, bandwidth %" PRId64 " - %" PRId64 " Hz, rate %" PRIu64 " - %" PRIu64
 		" Hz, gain %.0f - %.0f dB\n",
 		m_limits.minCenterFreq, m_limits.maxCenterFreq, m_limits.minBandwidth, m_limits.maxBandwidth,
@@ -245,6 +261,134 @@ void IIOSDR::DetectLimits()
 }
 
 /**
+	@brief Figures out whether we can transmit
+
+	Transmitting is done with the DDS core in the FPGA, which is what the stock firmware of the radios we support has.
+	Each transmit path has one DDS per tone for each of I and Q, named TXn_I_Fm and TXn_Q_Fm. A tone is a complex
+	sinusoid, made by running the I and Q DDSs at the same frequency 90 degrees apart.
+ */
+void IIOSDR::DetectTransmitter()
+{
+	m_numTx = 0;
+	m_numTones = 0;
+	m_txTones.clear();
+
+	if(!m_ctx->HasDevice(g_ddsDevice))
+		return;
+
+	while( (m_numTones < g_maxTones) && m_ctx->HasChannel(g_ddsDevice, GetToneChannelName(0, m_numTones, false), true) )
+		m_numTones ++;
+	while( (m_numTx < g_maxTx) &&
+		m_ctx->HasChannel(g_ddsDevice, GetToneChannelName(m_numTx, 0, false), true) &&
+		m_ctx->HasChannel(g_ddsDevice, GetToneChannelName(m_numTx, 0, true), true) &&
+		m_ctx->HasChannel(g_phyDevice, "voltage" + to_string(m_numTx), true) )
+	{
+		m_numTx ++;
+	}
+	if( (m_numTx == 0) || (m_numTones == 0) )
+	{
+		m_numTx = 0;
+		m_numTones = 0;
+		return;
+	}
+
+	TxTone off = { false, 0, 0, false };
+	m_txTones.assign(m_numTx, vector<TxTone>(m_numTones, off));
+
+	for(size_t i=0; i<m_numTx; i++)
+	{
+		auto chan = new SDRTransmitChannel(
+			this,
+			string("TX") + to_string(i+1),
+			GetChannelColor(m_numRx + i),
+			m_channels.size(),
+			i);
+		m_channels.push_back(chan);
+	}
+
+	//The TX LO usually has the same range as the RX LO, but use what the radio says if it says something
+	m_txLoMin = m_limits.minCenterFreq;
+	m_txLoMax = m_limits.maxCenterFreq;
+	double lo;
+	double hi;
+	if(ReadRange(m_ctx, g_phyDevice, "altvoltage1", true, "frequency_available", lo, hi))
+	{
+		m_txLoMin = lo;
+		m_txLoMax = hi;
+	}
+	m_txMaxToneFreq = m_sampleRate / 2;
+}
+
+/**
+	@brief Gets the IIO name of one of the DDS channels making up a tone
+
+	@param tx		Zero-based transmit path
+	@param tone		Zero-based tone
+	@param q		True for the Q DDS, false for the I DDS
+ */
+string IIOSDR::GetToneChannelName(size_t tx, size_t tone, bool q)
+{
+	return "TX" + to_string(tx+1) + (q ? "_Q_F" : "_I_F") + to_string(tone+1);
+}
+
+/**
+	@brief Reads the state of a tone from the hardware
+
+	@return		True if the tone could be read
+ */
+bool IIOSDR::ReadTone(size_t tx, size_t tone, TxTone& out)
+{
+	auto iname = GetToneChannelName(tx, tone, false);
+	auto qname = GetToneChannelName(tx, tone, true);
+
+	int64_t freq;
+	int64_t raw;
+	int64_t iphase;
+	int64_t qphase;
+	double scale;
+	if( !m_ctx->ReadChannelAttrInt(g_ddsDevice, iname, true, "frequency", freq) ||
+		!m_ctx->ReadChannelAttrInt(g_ddsDevice, iname, true, "raw", raw) ||
+		!m_ctx->ReadChannelAttrDouble(g_ddsDevice, iname, true, "scale", scale) ||
+		!m_ctx->ReadChannelAttrInt(g_ddsDevice, iname, true, "phase", iphase) ||
+		!m_ctx->ReadChannelAttrInt(g_ddsDevice, qname, true, "phase", qphase) )
+	{
+		return false;
+	}
+
+	//Positive frequencies have I leading Q by 90 degrees (phases are in millidegrees), negative ones have Q leading
+	int64_t diff = ((iphase - qphase) % 360000 + 360000) % 360000;
+	bool negative = (diff > 180000);
+
+	out.enabled = (raw != 0);
+	out.freq = negative ? -freq : freq;
+	out.amplitude = scale;
+	return true;
+}
+
+/**
+	@brief Writes the state of a tone to the hardware
+
+	Failures are logged by the context.
+ */
+void IIOSDR::WriteTone(size_t tx, size_t tone, const TxTone& in)
+{
+	int64_t freq = llabs(in.freq);
+	bool negative = (in.freq < 0);
+
+	for(bool q : { false, true })
+	{
+		auto name = GetToneChannelName(tx, tone, q);
+
+		//The leading DDS is 90 degrees ahead
+		bool leads = (q == negative);
+		m_ctx->WriteChannelAttrInt(g_ddsDevice, name, true, "phase", leads ? 90000 : 0);
+		m_ctx->WriteChannelAttrInt(g_ddsDevice, name, true, "frequency", freq);
+		m_ctx->WriteChannelAttrDouble(g_ddsDevice, name, true, "scale", in.amplitude);
+		m_ctx->WriteChannelAttrInt(g_ddsDevice, name, true, "raw", in.enabled ? 1 : 0);
+	}
+}
+
+/**
 	@brief Reads the current LO frequency, sample rate, bandwidth, and gain from the hardware and adopts them
  */
 void IIOSDR::ReadHardwareConfiguration()
@@ -279,6 +423,33 @@ void IIOSDR::ReadHardwareConfiguration()
 		m_gainDirty[i] = false;
 		m_gainModeDirty[i] = false;
 	}
+
+	if(m_numTx > 0)
+	{
+		int64_t txlo;
+		if(m_ctx->ReadChannelAttrInt(g_phyDevice, "altvoltage1", true, "frequency", txlo))
+			m_txLoFreq = txlo;
+		m_txLoDirty = false;
+
+		int64_t txrate;
+		if(m_ctx->ReadChannelAttrInt(g_phyDevice, "voltage0", true, "sampling_frequency", txrate))
+			m_txMaxToneFreq = txrate / 2;
+		else
+			m_txMaxToneFreq = m_sampleRate / 2;
+
+		for(size_t i=0; i<m_numTx; i++)
+		{
+			for(size_t j=0; j<m_numTones; j++)
+			{
+				TxTone tone;
+				if(ReadTone(i, j, tone))
+				{
+					m_txTones[i][j] = tone;
+					m_txTones[i][j].dirty = false;
+				}
+			}
+		}
+	}
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -311,6 +482,10 @@ void IIOSDR::ApplyConfiguration()
 	vector<float> gain(m_numRx);
 	vector<bool> doGainMode(m_numRx);
 	vector<bool> doGain(m_numRx);
+	bool doTxLo = false;
+	int64_t txLo = 0;
+	vector<pair<size_t, size_t> > txPending;
+	vector<TxTone> txPendingTones;
 	bool any;
 	{
 		lock_guard<recursive_mutex> lock(m_cacheMutex);
@@ -340,6 +515,25 @@ void IIOSDR::ApplyConfiguration()
 
 			any |= doGainMode[i] || doGain[i];
 		}
+
+		doTxLo = m_txLoDirty;
+		txLo = m_txLoFreq;
+		m_txLoDirty = false;
+		any |= doTxLo;
+
+		for(size_t i=0; i<m_numTx; i++)
+		{
+			for(size_t j=0; j<m_numTones; j++)
+			{
+				if(!m_txTones[i][j].dirty)
+					continue;
+
+				txPending.push_back(pair<size_t, size_t>(i, j));
+				txPendingTones.push_back(m_txTones[i][j]);
+				m_txTones[i][j].dirty = false;
+				any = true;
+			}
+		}
 	}
 
 	if(!any)
@@ -353,6 +547,25 @@ void IIOSDR::ApplyConfiguration()
 		m_ctx->WriteChannelAttrInt(g_phyDevice, "voltage0", false, "rf_bandwidth", span);
 	if(doFreq)
 		m_ctx->WriteChannelAttrInt(g_phyDevice, "altvoltage0", true, "frequency", freq);
+	if(doTxLo)
+		m_ctx->WriteChannelAttrInt(g_phyDevice, "altvoltage1", true, "frequency", txLo);
+
+	//The transmit sample rate follows the receive rate, and tones can't be faster than half of it
+	int64_t maxTone = 0;
+	if(m_numTx > 0)
+	{
+		int64_t txRate;
+		if(m_ctx->ReadChannelAttrInt(g_phyDevice, "voltage0", true, "sampling_frequency", txRate))
+			maxTone = txRate / 2;
+		else
+			maxTone = m_hwSampleRate / 2;
+	}
+	for(size_t n=0; n<txPending.size(); n++)
+	{
+		auto& tone = txPendingTones[n];
+		tone.freq = min(max(tone.freq, -maxTone), maxTone);
+		WriteTone(txPending[n].first, txPending[n].second, tone);
+	}
 
 	//Mode has to be set before gain
 	for(size_t i=0; i<m_numRx; i++)
@@ -383,6 +596,13 @@ void IIOSDR::ApplyConfiguration()
 		haveGain[i] = m_ctx->ReadChannelAttrDouble(g_phyDevice, id, false, "hardwaregain", hwGain[i]);
 	}
 
+	int64_t hwTxLo = 0;
+	bool haveTxLo = (m_numTx > 0) && m_ctx->ReadChannelAttrInt(g_phyDevice, "altvoltage1", true, "frequency", hwTxLo);
+	vector<TxTone> hwTones(txPending.size());
+	vector<bool> haveTones(txPending.size());
+	for(size_t n=0; n<txPending.size(); n++)
+		haveTones[n] = ReadTone(txPending[n].first, txPending[n].second, hwTones[n]);
+
 	lock_guard<recursive_mutex> lock(m_cacheMutex);
 	if(haveFreq)
 	{
@@ -406,6 +626,24 @@ void IIOSDR::ApplyConfiguration()
 		//If we still owe the radio a gain (waiting for manual mode) don't clobber it with what's there now
 		if(haveGain[i] && !m_gainDirty[i])
 			m_gain[i] = hwGain[i];
+	}
+
+	if(m_numTx > 0)
+	{
+		m_txMaxToneFreq = maxTone;
+		if(haveTxLo && !m_txLoDirty)
+			m_txLoFreq = hwTxLo;
+
+		//The DDS may not be able to do exactly what we asked for
+		for(size_t n=0; n<txPending.size(); n++)
+		{
+			auto& tone = m_txTones[txPending[n].first][txPending[n].second];
+			if(haveTones[n] && !tone.dirty)
+			{
+				tone = hwTones[n];
+				tone.dirty = false;
+			}
+		}
 	}
 }
 
@@ -546,6 +784,109 @@ void IIOSDR::SetGain(size_t i, float gain)
 	lock_guard<recursive_mutex> lock(m_cacheMutex);
 	m_gain[i] = min(max(gain, m_limits.minGain), m_limits.maxGain);
 	m_gainDirty[i] = true;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Transmit control
+
+size_t IIOSDR::GetTxChannelCount()
+{
+	return m_numTx;
+}
+
+size_t IIOSDR::GetTxToneCount(size_t tx)
+{
+	if(tx >= m_numTx)
+		return 0;
+	return m_numTones;
+}
+
+int64_t IIOSDR::GetTxLOFrequency()
+{
+	lock_guard<recursive_mutex> lock(m_cacheMutex);
+	return m_txLoFreq;
+}
+
+void IIOSDR::SetTxLOFrequency(int64_t freq)
+{
+	if(m_numTx == 0)
+		return;
+
+	lock_guard<recursive_mutex> lock(m_cacheMutex);
+	m_txLoFreq = min(max(freq, m_txLoMin), m_txLoMax);
+	m_txLoDirty = true;
+}
+
+pair<int64_t, int64_t> IIOSDR::GetTxLOFrequencyRange()
+{
+	return pair<int64_t, int64_t>(m_txLoMin, m_txLoMax);
+}
+
+bool IIOSDR::IsTxToneEnabled(size_t tx, size_t tone)
+{
+	if( (tx >= m_numTx) || (tone >= m_numTones) )
+		return false;
+
+	lock_guard<recursive_mutex> lock(m_cacheMutex);
+	return m_txTones[tx][tone].enabled;
+}
+
+void IIOSDR::SetTxToneEnabled(size_t tx, size_t tone, bool enabled)
+{
+	if( (tx >= m_numTx) || (tone >= m_numTones) )
+		return;
+
+	lock_guard<recursive_mutex> lock(m_cacheMutex);
+	m_txTones[tx][tone].enabled = enabled;
+	m_txTones[tx][tone].dirty = true;
+}
+
+int64_t IIOSDR::GetTxToneFrequency(size_t tx, size_t tone)
+{
+	if( (tx >= m_numTx) || (tone >= m_numTones) )
+		return 0;
+
+	lock_guard<recursive_mutex> lock(m_cacheMutex);
+	return m_txTones[tx][tone].freq;
+}
+
+void IIOSDR::SetTxToneFrequency(size_t tx, size_t tone, int64_t freq)
+{
+	if( (tx >= m_numTx) || (tone >= m_numTones) )
+		return;
+
+	lock_guard<recursive_mutex> lock(m_cacheMutex);
+
+	//The transmit rate follows the receive rate, so if that's about to change use the new one
+	int64_t limit = m_sampleRateDirty ? static_cast<int64_t>(m_sampleRate / 2) : m_txMaxToneFreq;
+	m_txTones[tx][tone].freq = min(max(freq, -limit), limit);
+	m_txTones[tx][tone].dirty = true;
+}
+
+pair<int64_t, int64_t> IIOSDR::GetTxToneFrequencyRange(size_t /*tx*/)
+{
+	lock_guard<recursive_mutex> lock(m_cacheMutex);
+	int64_t limit = m_sampleRateDirty ? static_cast<int64_t>(m_sampleRate / 2) : m_txMaxToneFreq;
+	return pair<int64_t, int64_t>(-limit, limit);
+}
+
+float IIOSDR::GetTxToneAmplitude(size_t tx, size_t tone)
+{
+	if( (tx >= m_numTx) || (tone >= m_numTones) )
+		return 0;
+
+	lock_guard<recursive_mutex> lock(m_cacheMutex);
+	return m_txTones[tx][tone].amplitude;
+}
+
+void IIOSDR::SetTxToneAmplitude(size_t tx, size_t tone, float amplitude)
+{
+	if( (tx >= m_numTx) || (tone >= m_numTones) )
+		return;
+
+	lock_guard<recursive_mutex> lock(m_cacheMutex);
+	m_txTones[tx][tone].amplitude = min(max(amplitude, 0.0f), 1.0f);
+	m_txTones[tx][tone].dirty = true;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
