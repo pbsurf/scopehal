@@ -59,6 +59,7 @@
 #include "ChannelEmulationFilter.h"
 #include "ClipFilter.h"
 #include "ClockRecoveryFilter.h"
+#include "ComplexFFTFilter.h"
 #include "ComplexImportFilter.h"
 #include "ComplexSpectrogramFilter.h"
 #include "ConstantFilter.h"

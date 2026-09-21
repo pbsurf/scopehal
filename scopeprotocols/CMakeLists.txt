@@ -19,6 +19,7 @@ set(SCOPEPROTOCOLS_SOURCES
 	ChannelEmulationFilter.cpp
 	ClipFilter.cpp
 	ClockRecoveryFilter.cpp
+	ComplexFFTFilter.cpp
 	ComplexImportFilter.cpp
 	ComplexSpectrogramFilter.cpp
 	ConstellationFilter.cpp
