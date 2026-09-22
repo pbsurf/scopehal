@@ -146,12 +146,6 @@ public:
 	///@brief Gets the range of allowed transmit local oscillator frequencies, in Hz, as (min, max)
 	virtual std::pair<int64_t, int64_t> GetTxLOFrequencyRange();
 
-	///@brief Returns true if a tone is being generated
-	virtual bool IsTxToneEnabled(size_t tx, size_t tone);
-
-	///@brief Turns a tone on or off
-	virtual void SetTxToneEnabled(size_t tx, size_t tone, bool enabled);
-
 	///@brief Gets the frequency of a tone relative to the transmit LO, in Hz. Negative is below the LO.
 	virtual int64_t GetTxToneFrequency(size_t tx, size_t tone);
 

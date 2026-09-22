@@ -294,7 +294,7 @@ void IIOSDR::DetectTransmitter()
 		return;
 	}
 
-	TxTone off = { false, 0, 0, false };
+	TxTone off = { 0, 0, false };
 	m_txTones.assign(m_numTx, vector<TxTone>(m_numTones, off));
 	m_txAtten.assign(m_numTx, 0);
 	m_txAttenDirty.assign(m_numTx, false);
@@ -308,6 +308,21 @@ void IIOSDR::DetectTransmitter()
 			m_channels.size(),
 			i);
 		m_channels.push_back(chan);
+	}
+
+	//A tone is muted by setting its amplitude to zero, not by disabling its DDS: the DDS core treats "raw" as tied
+	//to a core-wide phase/frequency sync, and toggling it per tone can visibly glitch other, unrelated tones. Force
+	//every DDS on so amplitude is the only thing that controls whether a tone is audible.
+	for(size_t i=0; i<m_numTx; i++)
+	{
+		for(size_t j=0; j<m_numTones; j++)
+		{
+			for(bool q : { false, true })
+			{
+				auto name = GetToneChannelName(i, j, q);
+				m_ctx->WriteChannelAttrInt(g_ddsDevice, name, true, "raw", 1);
+			}
+		}
 	}
 
 	//The TX LO usually has the same range as the RX LO, but use what the radio says if it says something
@@ -353,12 +368,10 @@ bool IIOSDR::ReadTone(size_t tx, size_t tone, TxTone& out)
 	auto qname = GetToneChannelName(tx, tone, true);
 
 	int64_t freq;
-	int64_t raw;
 	int64_t iphase;
 	int64_t qphase;
 	double scale;
 	if( !m_ctx->ReadChannelAttrInt(g_ddsDevice, iname, true, "frequency", freq) ||
-		!m_ctx->ReadChannelAttrInt(g_ddsDevice, iname, true, "raw", raw) ||
 		!m_ctx->ReadChannelAttrDouble(g_ddsDevice, iname, true, "scale", scale) ||
 		!m_ctx->ReadChannelAttrInt(g_ddsDevice, iname, true, "phase", iphase) ||
 		!m_ctx->ReadChannelAttrInt(g_ddsDevice, qname, true, "phase", qphase) )
@@ -370,7 +383,6 @@ bool IIOSDR::ReadTone(size_t tx, size_t tone, TxTone& out)
 	int64_t diff = ((iphase - qphase) % 360000 + 360000) % 360000;
 	bool negative = (diff > 180000);
 
-	out.enabled = (raw != 0);
 	out.freq = negative ? -freq : freq;
 	out.amplitude = scale;
 	return true;
@@ -395,7 +407,9 @@ void IIOSDR::WriteTone(size_t tx, size_t tone, const TxTone& in)
 		m_ctx->WriteChannelAttrInt(g_ddsDevice, name, true, "phase", leads ? 90000 : 0);
 		m_ctx->WriteChannelAttrInt(g_ddsDevice, name, true, "frequency", freq);
 		m_ctx->WriteChannelAttrDouble(g_ddsDevice, name, true, "scale", in.amplitude);
-		m_ctx->WriteChannelAttrInt(g_ddsDevice, name, true, "raw", in.enabled ? 1 : 0);
+
+		//Always keep the DDS enabled; a tone is muted via amplitude=0, not by toggling this off. See DetectTransmitter.
+		m_ctx->WriteChannelAttrInt(g_ddsDevice, name, true, "raw", 1);
 	}
 }
 
@@ -862,25 +876,6 @@ void IIOSDR::SetTxLOFrequency(int64_t freq)
 pair<int64_t, int64_t> IIOSDR::GetTxLOFrequencyRange()
 {
 	return pair<int64_t, int64_t>(m_txLoMin, m_txLoMax);
-}
-
-bool IIOSDR::IsTxToneEnabled(size_t tx, size_t tone)
-{
-	if( (tx >= m_numTx) || (tone >= m_numTones) )
-		return false;
-
-	lock_guard<recursive_mutex> lock(m_cacheMutex);
-	return m_txTones[tx][tone].enabled;
-}
-
-void IIOSDR::SetTxToneEnabled(size_t tx, size_t tone, bool enabled)
-{
-	if( (tx >= m_numTx) || (tone >= m_numTones) )
-		return;
-
-	lock_guard<recursive_mutex> lock(m_cacheMutex);
-	m_txTones[tx][tone].enabled = enabled;
-	m_txTones[tx][tone].dirty = true;
 }
 
 int64_t IIOSDR::GetTxToneFrequency(size_t tx, size_t tone)

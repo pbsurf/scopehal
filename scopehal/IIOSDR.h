@@ -108,8 +108,6 @@ public:
 	virtual int64_t GetTxLOFrequency() override;
 	virtual void SetTxLOFrequency(int64_t freq) override;
 	virtual std::pair<int64_t, int64_t> GetTxLOFrequencyRange() override;
-	virtual bool IsTxToneEnabled(size_t tx, size_t tone) override;
-	virtual void SetTxToneEnabled(size_t tx, size_t tone, bool enabled) override;
 	virtual int64_t GetTxToneFrequency(size_t tx, size_t tone) override;
 	virtual void SetTxToneFrequency(size_t tx, size_t tone, int64_t freq) override;
 	virtual std::pair<int64_t, int64_t> GetTxToneFrequencyRange(size_t tx) override;
@@ -153,8 +151,6 @@ protected:
 	///@brief Configuration of one tone from a DDS
 	struct TxTone
 	{
-		bool enabled;
-
 		///@brief Frequency relative to the TX LO in Hz, negative if below the LO
 		int64_t freq;
 

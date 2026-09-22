@@ -310,16 +310,6 @@ pair<int64_t, int64_t> SCPISDR::GetTxLOFrequencyRange()
 	return pair<int64_t, int64_t>(0, 0);
 }
 
-bool SCPISDR::IsTxToneEnabled(size_t /*tx*/, size_t /*tone*/)
-{
-	return false;
-}
-
-void SCPISDR::SetTxToneEnabled(size_t /*tx*/, size_t /*tone*/, bool /*enabled*/)
-{
-	//no-op
-}
-
 int64_t SCPISDR::GetTxToneFrequency(size_t /*tx*/, size_t /*tone*/)
 {
 	return 0;
@@ -381,7 +371,6 @@ void SCPISDR::DoSerializeConfiguration(YAML::Node& node, IDTable& /*table*/)
 			for(size_t j=0; j<GetTxToneCount(i); j++)
 			{
 				YAML::Node tone;
-				tone["enabled"] = IsTxToneEnabled(i, j);
 				tone["freq"] = GetTxToneFrequency(i, j);
 				tone["amplitude"] = GetTxToneAmplitude(i, j);
 				txnode["tone" + to_string(j)] = tone;
@@ -442,8 +431,6 @@ void SCPISDR::DoLoadConfiguration(int /*version*/, const YAML::Node& node, IDTab
 					SetTxToneFrequency(i, j, tone["freq"].as<int64_t>());
 				if(tone["amplitude"])
 					SetTxToneAmplitude(i, j, tone["amplitude"].as<float>());
-				if(tone["enabled"])
-					SetTxToneEnabled(i, j, tone["enabled"].as<bool>());
 			}
 		}
 	}
