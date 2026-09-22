@@ -39,6 +39,7 @@ using namespace std;
 FFTFilter::FFTFilter(const string& color)
 	: PeakDetectionFilter(color, CAT_RF)
 	, m_windowName("Window")
+	, m_detectorName("Detector")
 	, m_blackmanHarrisComputePipeline("shaders/BlackmanHarrisWindow.spv", 2, sizeof(WindowFunctionArgs))
 	, m_rectangularComputePipeline("shaders/RectangularWindow.spv", 2, sizeof(WindowFunctionArgs))
 	, m_cosineSumComputePipeline("shaders/CosineSumWindow.spv", 2, sizeof(WindowFunctionArgs))
@@ -65,6 +66,11 @@ FFTFilter::FFTFilter(const string& color)
 	m_parameters[m_windowName].AddEnumValue("Hann", WINDOW_HANN);
 	m_parameters[m_windowName].AddEnumValue("Rectangular", WINDOW_RECTANGULAR);
 	m_parameters[m_windowName].SetIntVal(WINDOW_HAMMING);
+
+	m_parameters[m_detectorName] = FilterParameter(FilterParameter::TYPE_ENUM, Unit(Unit::UNIT_COUNTS));
+	m_parameters[m_detectorName].AddEnumValue("Normal", DETECTOR_NORMAL);
+	m_parameters[m_detectorName].AddEnumValue("Peak", DETECTOR_PEAK);
+	m_parameters[m_detectorName].SetIntVal(DETECTOR_NORMAL);
 }
 
 FFTFilter::~FFTFilter()

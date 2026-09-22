@@ -71,6 +71,17 @@ public:
 		WINDOW_BLACKMAN_HARRIS
 	};
 
+	/**
+		@brief Display detector, applied by the renderer when many bins map to one pixel column
+
+		Values must match the DETECTOR_* constants in ngscopeclient's waveform-compute.glsl
+	 */
+	enum DetectorType
+	{
+		DETECTOR_NORMAL = 0,
+		DETECTOR_PEAK = 1
+	};
+
 	PROTOCOL_DECODER_INITPROC(FFTFilter)
 
 	void SetWindowFunction(WindowFunction f)
@@ -109,6 +120,7 @@ protected:
 	float m_offset;
 
 	std::string m_windowName;
+	std::string m_detectorName;
 
 	std::unique_ptr<VulkanFFTPlan> m_vkPlan;
 
