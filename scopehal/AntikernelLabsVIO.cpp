@@ -36,6 +36,8 @@
 
 #include "scopehal.h"
 #include "AntikernelLabsVIO.h"
+#include "VIOInputChannel.h"
+#include "VIOOutputChannel.h"
 
 using namespace std;
 

@@ -38,6 +38,8 @@
 #ifndef AlientekPowerSupply_h
 #define AlientekPowerSupply_h
 
+#include "HIDInstrument.h"
+
 /**
 	@brief An Alientek DP-100 power supply or other equivalent model
 	@ingroup psudrivers

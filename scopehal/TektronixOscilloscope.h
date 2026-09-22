@@ -38,6 +38,8 @@
 #ifndef TektronixOscilloscope_h
 #define TektronixOscilloscope_h
 
+#include "SCPIMultimeter.h"
+
 class EdgeTrigger;
 class PulseWidthTrigger;
 class DropoutTrigger;

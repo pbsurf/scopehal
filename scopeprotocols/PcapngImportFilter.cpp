@@ -30,6 +30,11 @@
 #include "../scopehal/scopehal.h"
 #include "CANDecoder.h"
 #include "PcapngImportFilter.h"
+#include "../scopehal/CANChannel.h"
+
+#ifndef _WIN32
+#include <arpa/inet.h>
+#endif
 
 using namespace std;
 

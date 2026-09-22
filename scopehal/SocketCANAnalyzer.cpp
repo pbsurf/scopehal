@@ -37,6 +37,10 @@
 #include "scopehal.h"
 #include "SocketCANAnalyzer.h"
 #include "EdgeTrigger.h"
+#include "CANChannel.h"
+#ifdef __linux
+#include "SCPISocketCANTransport.h"
+#endif
 
 #ifdef __linux
 

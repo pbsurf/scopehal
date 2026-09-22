@@ -35,6 +35,7 @@
 #include "scopehal.h"
 #include "PicoOscilloscope.h"
 #include "EdgeTrigger.h"
+#include "SCPITwinLanTransport.h"
 
 using namespace std;
 

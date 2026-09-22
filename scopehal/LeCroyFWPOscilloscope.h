@@ -31,6 +31,7 @@
 #define LeCroyFWPOscilloscope_h
 
 #include "LeCroyOscilloscope.h"
+#include "../xptools/Socket.h"
 
 /**
 	@brief A Teledyne LeCroy oscilloscope using the FastWavePort interface for download instead of SCPI

@@ -34,6 +34,7 @@
  */
 
 #include "scopehal.h"
+#include "ModbusInstrument.h"
 
 using namespace std;
 

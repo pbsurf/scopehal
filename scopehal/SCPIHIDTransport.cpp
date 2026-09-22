@@ -36,6 +36,7 @@
  */
 
 #include "scopehal.h"
+#include "SCPIHIDTransport.h"
 
 using namespace std;
 

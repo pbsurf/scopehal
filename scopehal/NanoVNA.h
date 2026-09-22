@@ -37,6 +37,9 @@
 #ifndef NanoVNA_h
 #define NanoVNA_h
 
+#include "CommandLineDriver.h"
+#include "SCPIVNA.h"
+
 class EdgeTrigger;
 
 /**

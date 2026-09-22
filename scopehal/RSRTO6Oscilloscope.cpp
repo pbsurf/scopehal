@@ -40,6 +40,7 @@
 #include "scopehal.h"
 #include "RSRTO6Oscilloscope.h"
 #include "EdgeTrigger.h"
+#include "SCPISocketTransport.h"
 
 #include <cinttypes>
 

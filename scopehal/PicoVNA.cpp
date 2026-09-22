@@ -43,6 +43,7 @@
 #include "scopehal.h"
 #include "PicoVNA.h"
 #include "EdgeTrigger.h"
+#include "SParameterChannel.h"
 
 using namespace std;
 

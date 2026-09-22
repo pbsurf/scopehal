@@ -37,6 +37,8 @@
 #ifndef AntikernelLabsGPIO_h
 #define AntikernelLabsGPIO_h
 
+#include "SCPIMiscInstrument.h"
+
 /**
 	@brief A miscellaneous instrument which provides access to an Antikernel Labs GPIO bridge
 

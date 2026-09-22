@@ -35,6 +35,7 @@
  */
 
 #include "scopehal.h"
+#include "SParameterFilter.h"
 
 using namespace std;
 

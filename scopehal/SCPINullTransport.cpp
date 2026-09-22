@@ -39,6 +39,7 @@
 #include <string.h>
 
 #include "scopehal.h"
+#include "SCPINullTransport.h"
 
 using namespace std;
 

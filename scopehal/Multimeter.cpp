@@ -36,6 +36,7 @@
 
 #include "scopehal.h"
 #include "Multimeter.h"
+#include "MultimeterChannel.h"
 
 using namespace std;
 

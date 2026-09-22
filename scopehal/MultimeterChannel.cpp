@@ -35,6 +35,7 @@
  */
 
 #include "scopehal.h"
+#include "MultimeterChannel.h"
 
 using namespace std;
 

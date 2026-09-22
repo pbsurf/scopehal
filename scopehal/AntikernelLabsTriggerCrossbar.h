@@ -37,6 +37,9 @@
 #ifndef AntikernelLabsTriggerCrossbar_h
 #define AntikernelLabsTriggerCrossbar_h
 
+#include "SCPIBERT.h"
+#include "SwitchMatrix.h"
+
 /**
 	@brief An AKL-TXB1 trigger crossbar
 

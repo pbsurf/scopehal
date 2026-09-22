@@ -35,6 +35,8 @@
 #ifndef SParameterCascadeFilter_h
 #define SParameterCascadeFilter_h
 
+#include "../scopehal/SParameterFilter.h"
+
 class SParameterCascadeFilter : public SParameterFilter
 {
 public:

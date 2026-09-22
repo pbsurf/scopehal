@@ -39,6 +39,8 @@
 
 #include <mutex>
 
+#include "SCPIMultimeter.h"
+
 class DropoutTrigger;
 class EdgeTrigger;
 class GlitchTrigger;

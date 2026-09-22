@@ -41,6 +41,7 @@
 #include <unistd.h>
 
 #include "scopehal.h"
+#include "SCPITMCTransport.h"
 
 using namespace std;
 

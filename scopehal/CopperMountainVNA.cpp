@@ -35,6 +35,7 @@
 
 #include "scopehal.h"
 #include "CopperMountainVNA.h"
+#include "SParameterChannel.h"
 
 using namespace std;
 

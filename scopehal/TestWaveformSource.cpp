@@ -36,6 +36,7 @@
  */
 #include "scopehal.h"
 #include "TestWaveformSource.h"
+#include "TouchstoneParser.h"
 #include <complex>
 
 using namespace std;

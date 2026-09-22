@@ -41,6 +41,7 @@
 #include "BufferedSwitchMatrixIOChannel.h"
 #include "BERTInputChannelWithDataCapture.h"
 #include "EdgeTrigger.h"
+#include "BERT.h"
 
 using namespace std;
 

@@ -37,6 +37,9 @@
 #ifndef AseqSpectrometer_h
 #define AseqSpectrometer_h
 
+#include "SCPISpectrometer.h"
+#include "SpectrometerDarkFrameChannel.h"
+
 class EdgeTrigger;
 
 #include "RemoteBridgeOscilloscope.h"

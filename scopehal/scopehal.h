@@ -115,7 +115,6 @@ struct FIRFilterArgs
 uint32_t GetComputeBlockCount(size_t numGlobal, size_t blockSize);
 
 #include "Unit.h"
-#include "Bijection.h"
 #include "IDTable.h"
 
 #include "AcceleratorBuffer.h"
@@ -123,6 +122,47 @@ uint32_t GetComputeBlockCount(size_t numGlobal, size_t blockSize);
 #include "ComputePipeline.h"
 
 #include "SCPITransport.h"
+#include "SCPIDevice.h"
+
+#include "FlowGraphNode.h"
+#include "Instrument.h"
+#include "StreamDescriptor.h"
+#include "InputConstraint.h"
+
+#include "OscilloscopeChannel.h"
+#include "StreamDescriptor_inlines.h"
+#include "FlowGraphNode_inlines.h"
+#include "Trigger.h"
+
+#include "FunctionGenerator.h"
+#include "FunctionGeneratorChannel.h"
+#include "Multimeter.h"
+#include "Oscilloscope.h"
+#include "PowerSupply.h"
+#include "PowerSupplyChannel.h"
+#include "SCPIInstrument.h"
+#include "SCPIFunctionGenerator.h"
+#include "SCPIOscilloscope.h"
+#include "SCPIPowerSupply.h"
+
+#include "SParameters.h"
+
+#include "FilterParameter.h"
+#include "Filter.h"
+
+#include "QueueManager.h"
+#include "NamedDebugRange.h"
+
+/*
+	Headers below are only used by a handful of source files, which include them explicitly.
+
+	In-tree builds define SCOPEHAL_NO_LEGACY_INCLUDES so that editing one of them does not rebuild the whole tree.
+	Out-of-tree code (plugins etc.) that relies on scopehal.h pulling in everything still gets them.
+ */
+#ifndef SCOPEHAL_NO_LEGACY_INCLUDES
+
+#include "Bijection.h"
+
 #include "SCPISocketTransport.h"
 #include "SCPITwinLanTransport.h"
 #include "SCPILxiTransport.h"
@@ -131,7 +171,6 @@ uint32_t GetComputeBlockCount(size_t numGlobal, size_t blockSize);
 #include "SCPIUARTTransport.h"
 #include "SCPIHIDTransport.h"
 #include "VICPSocketTransport.h"
-#include "SCPIDevice.h"
 #ifdef __linux
 #include "SCPISocketCANTransport.h"
 #endif
@@ -142,18 +181,9 @@ uint32_t GetComputeBlockCount(size_t numGlobal, size_t blockSize);
 #include "SCPITMCTransport.h"
 #endif
 
-#include "FlowGraphNode.h"
 #include "SinkNode.h"
-#include "Instrument.h"
-#include "StreamDescriptor.h"
 #include "StreamGroupDescriptor.h"
-#include "InputConstraint.h"
-
-#include "OscilloscopeChannel.h"
-#include "StreamDescriptor_inlines.h"
 #include "StreamGroupDescriptor_inlines.h"
-#include "FlowGraphNode_inlines.h"
-#include "Trigger.h"
 
 #include "BERT.h"
 #include "BinaryDriver.h"
@@ -164,29 +194,19 @@ uint32_t GetComputeBlockCount(size_t numGlobal, size_t blockSize);
 #include "VectorGPIOChannel.h"
 #include "VIOInputChannel.h"
 #include "VIOOutputChannel.h"
-#include "FunctionGenerator.h"
-#include "FunctionGeneratorChannel.h"
 #include "Load.h"
 #include "CANChannel.h"
-#include "Multimeter.h"
 #include "MultimeterChannel.h"
-#include "Oscilloscope.h"
 #include "SParameterChannel.h"
-#include "PowerSupply.h"
-#include "PowerSupplyChannel.h"
 #include "RFSignalGenerator.h"
 #include "RFSignalGeneratorChannel.h"
-#include "SCPIInstrument.h"
 #include "MockInstrument.h"
 #include "HIDInstrument.h"
 #include "ModbusInstrument.h"
 #include "SCPIBERT.h"
-#include "SCPIFunctionGenerator.h"
 #include "SCPILoad.h"
 #include "SCPIMiscInstrument.h"
 #include "SCPIMultimeter.h"
-#include "SCPIOscilloscope.h"
-#include "SCPIPowerSupply.h"
 #include "SCPIRFSignalGenerator.h"
 #include "SpectrometerDarkFrameChannel.h"
 #include "SCPISA.h"
@@ -195,12 +215,9 @@ uint32_t GetComputeBlockCount(size_t numGlobal, size_t blockSize);
 #include "SCPIVNA.h"
 #include "SwitchMatrix.h"
 
-#include "SParameters.h"
 #include "TouchstoneParser.h"
 #include "IBISParser.h"
 
-#include "FilterParameter.h"
-#include "Filter.h"
 #include "ImportFilter.h"
 #include "PeakDetectionFilter.h"
 #include "SpectrumChannel.h"
@@ -209,8 +226,7 @@ uint32_t GetComputeBlockCount(size_t numGlobal, size_t blockSize);
 
 #include "FilterGraphExecutor.h"
 
-#include "QueueManager.h"
-#include "NamedDebugRange.h"
+#endif
 
 uint64_t ConvertVectorSignalToScalar(const std::vector<bool>& bits);
 

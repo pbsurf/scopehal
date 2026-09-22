@@ -30,6 +30,7 @@
 #include "../scopehal/scopehal.h"
 #include "../scopehal/KahanSummation.h"
 #include "ConstellationFilter.h"
+#include "../scopehal/PeakDetectionFilter.h"
 #include <algorithm>
 #ifdef __x86_64__
 #include <immintrin.h>

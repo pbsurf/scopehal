@@ -30,6 +30,8 @@
 #ifndef SiglentLoad_h
 #define SiglentLoad_h
 
+#include "SCPILoad.h"
+
 /**
 	@brief Siglent electronic load
 

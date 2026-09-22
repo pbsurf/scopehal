@@ -35,6 +35,8 @@
 #ifndef PeakHoldFilter_h
 #define PeakHoldFilter_h
 
+#include "../scopehal/PeakDetectionFilter.h"
+
 class PeakHoldFilter : public PeakDetectionFilter
 {
 public:

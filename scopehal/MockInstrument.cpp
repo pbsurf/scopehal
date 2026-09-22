@@ -36,6 +36,7 @@
 
 #include "scopehal.h"
 #include "MockInstrument.h"
+#include "SCPINullTransport.h"
 
 using namespace std;
 

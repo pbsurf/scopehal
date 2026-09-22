@@ -35,6 +35,7 @@
  */
 
 #include "scopehal.h"
+#include "FilterGraphExecutor.h"
 #include <shared_mutex>
 #include "FusibleShader.h"
 #include "ShaderBaker.h"

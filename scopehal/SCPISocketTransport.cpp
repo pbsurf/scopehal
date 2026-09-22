@@ -35,6 +35,7 @@
  */
 
 #include "scopehal.h"
+#include "SCPISocketTransport.h"
 
 using namespace std;
 

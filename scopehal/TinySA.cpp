@@ -37,6 +37,7 @@
 
 #include "scopehal.h"
 #include "TinySA.h"
+#include "SpectrumChannel.h"
 #include <cinttypes>
 
 using namespace std;

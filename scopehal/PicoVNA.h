@@ -37,6 +37,8 @@
 #ifndef PicoVNA_h
 #define PicoVNA_h
 
+#include "SCPIVNA.h"
+
 class EdgeTrigger;
 
 /**

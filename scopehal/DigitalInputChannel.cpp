@@ -35,6 +35,7 @@
  */
 
 #include "scopehal.h"
+#include "DigitalInputChannel.h"
 
 using namespace std;
 

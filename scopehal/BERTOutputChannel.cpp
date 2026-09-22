@@ -35,6 +35,7 @@
  */
 
 #include "scopehal.h"
+#include "BERT.h"
 
 using namespace std;
 

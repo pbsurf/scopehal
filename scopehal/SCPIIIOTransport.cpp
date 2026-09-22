@@ -37,6 +37,7 @@
 #ifdef HAS_IIO
 
 #include "scopehal.h"
+#include "SCPIIIOTransport.h"
 
 using namespace std;
 

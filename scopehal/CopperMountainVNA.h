@@ -36,6 +36,8 @@
 #ifndef CopperMountainVNA_h
 #define CopperMountainVNA_h
 
+#include "SCPIVNA.h"
+
 /**
 	@brief Driver for Copper Mountain VNAs
 	@ingroup vnadrivers

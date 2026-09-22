@@ -38,6 +38,8 @@
 #ifndef HIDInstrument_h
 #define HIDInstrument_h
 
+#include "BinaryDriver.h"
+
 /**
 	@brief Base class for instruments using USB HID communication protocol
 	@ingroup core

@@ -35,6 +35,8 @@
 #ifndef OwonXDMMultimeter_h
 #define OwonXDMMultimeter_h
 
+#include "SCPIMultimeter.h"
+
 /**
 	@brief Driver for Owon XDM multimeter
  */

@@ -41,6 +41,7 @@
 #include "scopehal.h"
 #include "DSLabsOscilloscope.h"
 #include "EdgeTrigger.h"
+#include "SCPITwinLanTransport.h"
 
 using namespace std;
 

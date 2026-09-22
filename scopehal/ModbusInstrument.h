@@ -36,6 +36,8 @@
 #ifndef ModbusInstrument_h
 #define ModbusInstrument_h
 
+#include "BinaryDriver.h"
+
 /**
 	@brief Base class for instruments using Modbus communication protocol
 	@ingroup core

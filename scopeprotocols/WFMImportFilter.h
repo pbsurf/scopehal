@@ -35,6 +35,8 @@
 #ifndef WFMImportFilter_h
 #define WFMImportFilter_h
 
+#include "../scopehal/ImportFilter.h"
+
 class WFMImportFilter : public ImportFilter
 {
 public:

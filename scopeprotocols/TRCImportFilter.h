@@ -35,6 +35,8 @@
 #ifndef TRCImportFilter_h
 #define TRCImportFilter_h
 
+#include "../scopehal/ImportFilter.h"
+
 class TRCImportFilter : public ImportFilter
 {
 public:

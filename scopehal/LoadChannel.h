@@ -37,6 +37,8 @@
 #ifndef LoadChannel_h
 #define LoadChannel_h
 
+#include "Load.h"
+
 /**
 	@brief A single channel of an active load
 	@ingroup datamodel

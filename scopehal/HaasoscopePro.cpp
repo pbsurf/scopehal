@@ -42,6 +42,7 @@
 #include "scopehal.h"
 #include "HaasoscopePro.h"
 #include "EdgeTrigger.h"
+#include "SCPISocketTransport.h"
 
 using namespace std;
 

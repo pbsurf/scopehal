@@ -36,6 +36,7 @@
 #define FFTFilter_h
 
 #include "VulkanFFTPlan.h"
+#include "../scopehal/PeakDetectionFilter.h"
 
 class QueueHandle;
 

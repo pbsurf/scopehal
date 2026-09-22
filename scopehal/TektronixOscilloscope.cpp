@@ -43,6 +43,7 @@
 #include "RuntTrigger.h"
 #include "SlewRateTrigger.h"
 #include "WindowTrigger.h"
+#include "SpectrumChannel.h"
 
 using namespace std;
 

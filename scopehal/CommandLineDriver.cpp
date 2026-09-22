@@ -38,6 +38,7 @@
  */
 
 #include "scopehal.h"
+#include "CommandLineDriver.h"
 
 using namespace std;
 

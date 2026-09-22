@@ -35,6 +35,7 @@
  */
 
 #include "scopehal.h"
+#include "SCPISocketCANTransport.h"
 
 #ifdef __linux
 

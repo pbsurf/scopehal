@@ -36,6 +36,7 @@
 #ifndef BERTInputChannelWithDataCapture_h
 #define BERTInputChannelWithDataCapture_h
 
+#include "BERT.h"
 #include "BERTInputChannel.h"
 
 /**

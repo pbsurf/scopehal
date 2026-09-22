@@ -36,6 +36,7 @@
  */
 
 #include "scopehal.h"
+#include "BinaryDriver.h"
 
 using namespace std;
 

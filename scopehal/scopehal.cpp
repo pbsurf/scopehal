@@ -120,6 +120,28 @@
 #include "RSRTB2kTimeoutTrigger.h"
 #include "RSRTB2kVideoTrigger.h"
 #include "RSRTB2kWidthTrigger.h"
+#include "SCPIBERT.h"
+#include "SCPIHIDTransport.h"
+#include "SCPIIIOTransport.h"
+#include "SCPILoad.h"
+#include "SCPILxiTransport.h"
+#include "SCPIMiscInstrument.h"
+#include "SCPIMultimeter.h"
+#include "SCPINullTransport.h"
+#include "SCPIRFSignalGenerator.h"
+#include "SCPISDR.h"
+#ifdef __linux
+#include "SCPISocketCANTransport.h"
+#endif
+#include "SCPISocketTransport.h"
+#include "SCPISpectrometer.h"
+#if !defined(_WIN32) && !defined(__APPLE__)
+#include "SCPITMCTransport.h"
+#endif
+#include "SCPITwinLanTransport.h"
+#include "SCPIUARTTransport.h"
+#include "SCPIVNA.h"
+#include "VICPSocketTransport.h"
 
 #ifndef _WIN32
 #include <dlfcn.h>

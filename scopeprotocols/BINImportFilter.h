@@ -35,6 +35,8 @@
 #ifndef BINImportFilter_h
 #define BINImportFilter_h
 
+#include "../scopehal/ImportFilter.h"
+
 class BINImportFilter : public ImportFilter
 {
 public:

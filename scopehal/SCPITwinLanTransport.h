@@ -37,6 +37,8 @@
 #ifndef SCPITwinLanTransport_h
 #define SCPITwinLanTransport_h
 
+#include "SCPISocketTransport.h"
+
 /**
 	@brief A SCPISocketTransport plus a second socket for waveform data
 

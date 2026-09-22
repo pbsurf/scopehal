@@ -30,6 +30,8 @@
 #ifndef SCPILoad_h
 #define SCPILoad_h
 
+#include "Load.h"
+
 /**
 	@brief An SCPI-based electronic load
  */

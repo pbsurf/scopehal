@@ -34,6 +34,7 @@
 	@ingroup core
  */
 #include "scopehal.h"
+#include "IBISParser.h"
 
 using namespace std;
 

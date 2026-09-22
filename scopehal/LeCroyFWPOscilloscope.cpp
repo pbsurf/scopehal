@@ -29,6 +29,7 @@
 
 #include "scopehal.h"
 #include "LeCroyFWPOscilloscope.h"
+#include "VICPSocketTransport.h"
 
 using namespace std;
 

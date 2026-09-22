@@ -35,6 +35,7 @@
  */
 
 #include "scopehal.h"
+#include "VICPSocketTransport.h"
 
 using namespace std;
 

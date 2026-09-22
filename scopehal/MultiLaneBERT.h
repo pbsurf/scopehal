@@ -37,6 +37,8 @@
 #ifndef MultiLaneBERT_h
 #define MultiLaneBERT_h
 
+#include "SCPIBERT.h"
+
 /**
 	@brief A MultiLANE BERT accessed via scopehal-mlbert-bridge
 	@ingroup bertdrivers

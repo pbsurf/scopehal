@@ -42,6 +42,7 @@
 #include "scopehal.h"
 #include "ThunderScopeOscilloscope.h"
 #include "EdgeTrigger.h"
+#include "SCPITwinLanTransport.h"
 
 using namespace std;
 

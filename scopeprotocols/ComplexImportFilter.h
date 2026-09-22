@@ -35,6 +35,8 @@
 #ifndef ComplexImportFilter_h
 #define ComplexImportFilter_h
 
+#include "../scopehal/ImportFilter.h"
+
 class ComplexImportFilter : public ImportFilter
 {
 public:

@@ -35,6 +35,7 @@
  */
 
 #include "scopehal.h"
+#include "SCPIUARTTransport.h"
 
 using namespace std;
 

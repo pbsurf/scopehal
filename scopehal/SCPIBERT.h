@@ -30,6 +30,8 @@
 #ifndef SCPIBERT_h
 #define SCPIBERT_h
 
+#include "BERT.h"
+
 /**
 	@brief An SCPI-based BERT
  */

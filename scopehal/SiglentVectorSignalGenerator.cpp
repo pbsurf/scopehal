@@ -36,6 +36,8 @@
 
 #include "scopehal.h"
 #include "SiglentVectorSignalGenerator.h"
+#include "RFSignalGenerator.h"
+#include "RFSignalGeneratorChannel.h"
 
 using namespace std;
 

@@ -34,6 +34,8 @@
 
 #include "scopehal.h"
 #include "BufferedSwitchMatrixOutputChannel.h"
+#include "DigitalIOChannel.h"
+#include "DigitalInputChannel.h"
 
 using namespace std;
 

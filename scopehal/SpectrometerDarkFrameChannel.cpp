@@ -28,6 +28,7 @@
 ***********************************************************************************************************************/
 
 #include "scopehal.h"
+#include "SpectrometerDarkFrameChannel.h"
 
 using namespace std;
 

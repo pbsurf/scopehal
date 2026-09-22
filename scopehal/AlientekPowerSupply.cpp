@@ -37,6 +37,7 @@
 
 #include "scopehal.h"
 #include "AlientekPowerSupply.h"
+#include "SCPIHIDTransport.h"
 
 using namespace std;
 

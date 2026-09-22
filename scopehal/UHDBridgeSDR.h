@@ -38,6 +38,7 @@
 #define UHDBridgeSDR_h
 
 #include "RemoteBridgeOscilloscope.h"
+#include "SCPISDR.h"
 
 /**
 	@brief UHDBridgeSDR - driver for talking to the scopehal-uhd-bridge daemon (uhdbridge)

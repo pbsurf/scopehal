@@ -30,6 +30,7 @@
 #include "../scopehal/scopehal.h"
 #include "CANDecoder.h"
 #include "CANAnalyzerFilter.h"
+#include "../scopehal/CANChannel.h"
 
 using namespace std;
 

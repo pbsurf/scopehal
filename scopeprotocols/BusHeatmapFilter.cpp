@@ -32,6 +32,7 @@
 #include "BusHeatmapFilter.h"
 #include "CANDecoder.h"
 #include "SpectrogramFilter.h"
+#include "../scopehal/CANChannel.h"
 
 using namespace std;
 

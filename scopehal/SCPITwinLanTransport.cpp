@@ -35,6 +35,7 @@
  */
 
 #include "scopehal.h"
+#include "SCPITwinLanTransport.h"
 
 using namespace std;
 

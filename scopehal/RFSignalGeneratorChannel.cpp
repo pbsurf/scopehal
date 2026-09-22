@@ -28,6 +28,7 @@
 ***********************************************************************************************************************/
 
 #include "scopehal.h"
+#include "RFSignalGeneratorChannel.h"
 
 using namespace std;
 

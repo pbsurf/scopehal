@@ -38,6 +38,8 @@
 #include "EdgeTrigger.h"
 #include "AgilentOscilloscope.h"
 #include "RSRTB2kOscilloscope.h"
+#include "DigitalIOChannel.h"
+#include "DigitalInputChannel.h"
 
 using namespace std;
 

@@ -38,6 +38,9 @@
 #ifndef TinySA_h
 #define TinySA_h
 
+#include "CommandLineDriver.h"
+#include "SCPISA.h"
+
 /**
 	@brief Driver for TinySA and TinySA Ultra Spectrum Analizers
 	@ingroup scopedrivers

@@ -37,6 +37,8 @@
 #ifndef AntikernelLabsVIO_h
 #define AntikernelLabsVIO_h
 
+#include "SCPIMiscInstrument.h"
+
 /**
 	@brief A miscellaneous instrument which provides access to an Antikernel Labs VIO bridge
 

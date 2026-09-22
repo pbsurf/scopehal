@@ -34,6 +34,7 @@
  */
 
 #include "scopehal.h"
+#include "CANChannel.h"
 
 using namespace std;
 

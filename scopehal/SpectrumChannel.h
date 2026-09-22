@@ -30,6 +30,8 @@
 #ifndef SpectrumChannel_h
 #define SpectrumChannel_h
 
+#include "PeakDetectionFilter.h"
+
 /**
 	@brief A frequency domain oscilloscope channel
  */

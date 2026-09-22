@@ -36,6 +36,8 @@
 #ifndef RidenPowerSupply_h
 #define RidenPowerSupply_h
 
+#include "ModbusInstrument.h"
+
 /**
 	@brief A Riden RD6006 power supply or other equivalent model
 	@ingroup psudrivers

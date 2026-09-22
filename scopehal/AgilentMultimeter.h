@@ -35,6 +35,8 @@
 #ifndef AgilentMultimeter_h
 #define AgilentMultimeter_h
 
+#include "SCPIMultimeter.h"
+
 /**
 	@brief Driver for Agilent 34401A
  */

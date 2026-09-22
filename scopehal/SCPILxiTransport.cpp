@@ -42,6 +42,7 @@ extern "C"
 }
 
 #include "scopehal.h"
+#include "SCPILxiTransport.h"
 
 using namespace std;
 

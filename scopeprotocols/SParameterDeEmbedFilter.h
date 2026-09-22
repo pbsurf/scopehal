@@ -35,6 +35,8 @@
 #ifndef SParameterDeEmbedFilter_h
 #define SParameterDeEmbedFilter_h
 
+#include "../scopehal/SParameterFilter.h"
+
 /**
 	@brief De-embeds a known
  */

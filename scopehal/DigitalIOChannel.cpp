@@ -36,6 +36,7 @@
 
 
 #include "scopehal.h"
+#include "DigitalIOChannel.h"
 
 using namespace std;
 

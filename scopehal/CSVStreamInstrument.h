@@ -37,6 +37,8 @@
 #ifndef CSVStreamInstrument_h
 #define CSVStreamInstrument_h
 
+#include "SCPIMiscInstrument.h"
+
 /**
 	@brief A miscellaneous instrument which streams scalar data over CSV
 

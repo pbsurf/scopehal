@@ -35,6 +35,9 @@
 #ifndef BufferedSwitchMatrixOutputChannel_h
 #define BufferedSwitchMatrixOutputChannel_h
 
+#include "DigitalOutputChannel.h"
+#include "SwitchMatrix.h"
+
 /**
 	@brief An output channel of a buffered switch matrix
 	@ingroup core

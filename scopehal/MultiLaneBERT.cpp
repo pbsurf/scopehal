@@ -37,6 +37,8 @@
 #include "scopehal.h"
 #include "MultiLaneBERT.h"
 #include "EyeWaveform.h"
+#include "BERT.h"
+#include "SCPISocketTransport.h"
 
 using namespace std;
 

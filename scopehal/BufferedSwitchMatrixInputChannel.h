@@ -34,6 +34,9 @@
 #ifndef BufferedSwitchMatrixInputChannel_h
 #define BufferedSwitchMatrixInputChannel_h
 
+#include "DigitalInputChannel.h"
+#include "SwitchMatrix.h"
+
 /**
 	@brief An input channel of a buffered switch matrix
 	@ingroup core

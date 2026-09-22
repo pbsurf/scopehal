@@ -36,6 +36,8 @@
 #ifndef SinilinkPowerSupply_h
 #define SinilinkPowerSupply_h
 
+#include "ModbusInstrument.h"
+
 /**
 	@brief Implementation for Sinilink PSUs such as XY-S3580, XY6020L
 	@ingroup psudrivers

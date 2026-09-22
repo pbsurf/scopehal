@@ -35,6 +35,8 @@
 #ifndef TouchstoneImportFilter_h
 #define TouchstoneImportFilter_h
 
+#include "../scopehal/SParameterSourceFilter.h"
+
 class TouchstoneImportFilter : public SParameterSourceFilter
 {
 public:

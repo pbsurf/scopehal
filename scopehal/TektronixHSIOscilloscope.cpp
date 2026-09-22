@@ -37,6 +37,7 @@
 
 #include "scopehal.h"
 #include "TektronixHSIOscilloscope.h"
+#include "SCPITwinLanTransport.h"
 
 using namespace std;
 

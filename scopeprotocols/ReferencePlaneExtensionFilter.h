@@ -35,6 +35,8 @@
 #ifndef ReferencePlaneExtensionFilter_h
 #define ReferencePlaneExtensionFilter_h
 
+#include "../scopehal/SParameterFilter.h"
+
 class ReferencePlaneExtensionFilter : public SParameterFilter
 {
 public:

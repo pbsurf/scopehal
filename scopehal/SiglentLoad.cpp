@@ -30,6 +30,7 @@
 #include "scopehal.h"
 #include "SiglentLoad.h"
 #include "LoadChannel.h"
+#include "Load.h"
 
 using namespace std;
 

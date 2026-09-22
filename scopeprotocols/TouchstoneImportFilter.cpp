@@ -29,6 +29,7 @@
 
 #include "../scopehal/scopehal.h"
 #include "TouchstoneImportFilter.h"
+#include "../scopehal/TouchstoneParser.h"
 
 using namespace std;
 

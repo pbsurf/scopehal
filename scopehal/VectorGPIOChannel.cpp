@@ -35,6 +35,7 @@
  */
 
 #include "scopehal.h"
+#include "VectorGPIOChannel.h"
 
 using namespace std;
 

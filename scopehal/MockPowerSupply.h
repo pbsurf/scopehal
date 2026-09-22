@@ -37,6 +37,8 @@
 #ifndef MockPowerSupply_h
 #define MockPowerSupply_h
 
+#include "MockInstrument.h"
+
 /**
 	@brief A simulated power supply for demonstration
 

@@ -35,6 +35,8 @@
 #ifndef CSVImportFilter_h
 #define CSVImportFilter_h
 
+#include "../scopehal/ImportFilter.h"
+
 class CSVImportFilter : public ImportFilter
 {
 public:

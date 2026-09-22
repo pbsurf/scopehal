@@ -35,6 +35,7 @@
  */
 
 #include "scopehal.h"
+#include "VIOInputChannel.h"
 
 using namespace std;
 

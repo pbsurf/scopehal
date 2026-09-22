@@ -30,6 +30,8 @@
 #ifndef RohdeSchwarzHMC8012Multimeter_h
 #define RohdeSchwarzHMC8012Multimeter_h
 
+#include "SCPIMultimeter.h"
+
 /**
 	@brief A Rohde & Schwarz HMC8012 multimeter
  */

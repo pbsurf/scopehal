@@ -29,6 +29,7 @@
 
 #include "../scopehal/scopehal.h"
 #include "PAMEdgeDetectorFilter.h"
+#include "../scopehal/PeakDetectionFilter.h"
 
 using namespace std;
 

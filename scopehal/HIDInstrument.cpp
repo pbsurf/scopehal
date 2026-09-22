@@ -36,6 +36,7 @@
  */
 
 #include "scopehal.h"
+#include "HIDInstrument.h"
 
 using namespace std;
 

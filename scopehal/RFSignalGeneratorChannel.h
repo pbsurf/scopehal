@@ -30,7 +30,7 @@
 #ifndef RFSignalGeneratorChannel_h
 #define RFSignalGeneratorChannel_h
 
-class RFSignalGenerator;
+#include "RFSignalGenerator.h"
 
 /**
 	@brief A single channel of an RF signal generator

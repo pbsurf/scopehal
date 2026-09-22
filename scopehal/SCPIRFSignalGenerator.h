@@ -30,6 +30,8 @@
 #ifndef SCPIRFSignalGenerator_h
 #define SCPIRFSignalGenerator_h
 
+#include "RFSignalGenerator.h"
+
 /**
 	@brief An SCPI-based RF signal generator
  */
