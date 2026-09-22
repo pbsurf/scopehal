@@ -89,12 +89,14 @@ void DownsampleFilter::Refresh(vk::raii::CommandBuffer& cmdBuf, shared_ptr<Queue
 
 	//Propagate units
 	m_streams[0].m_yAxisUnit = GetInput(0).GetYAxisUnits();
+	m_xAxisUnit = m_inputs[0]->GetXAxisUnits();
 
 	//Validate input configuration
 	int64_t factor = m_decimationFactor.GetIntVal();
 	if (factor <= 0)
 	{
-		AddErrorMessage("Invalid configuration", "No waveform available at input");
+		AddErrorMessage("Invalid configuration", "Downsample factor must be greater than zero");
+		SetData(nullptr, 0);
 		return;
 	}
 	size_t outlen = len / factor;
@@ -128,7 +130,7 @@ void DownsampleFilter::Refresh(vk::raii::CommandBuffer& cmdBuf, shared_ptr<Queue
 		for(int x=0; x < kernel_size; x++)
 		{
 			int delta = (x - cfg.kernel_radius);
-			float f = alpha * exp(-delta*delta/(2*sigma));
+			float f = alpha * exp(-delta*delta/(2*sigma*sigma));
 			m_kernel[x] = f;
 
 			//TODO: are we summing enough to want Kahan here?
