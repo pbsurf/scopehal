@@ -56,6 +56,13 @@ static const size_t g_maxTones = 2;
 //Full scale of the 12 bit ADC (sign extended into 16 bits by libiio)
 static const float g_adcScale = 1.0f / 2048;
 
+//When sweeping, how much of the capture bandwidth we step the LO by. The rest is overlap between adjacent captures,
+//so that the analog filter rolloff at the edges of each capture isn't used.
+static const double g_sweepStepFraction = 0.8;
+
+//How long to let the synthesizer settle after moving the LO during a sweep
+static const chrono::microseconds g_sweepSettleTime(1000);
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Construction / destruction
 
@@ -87,6 +94,8 @@ IIOSDR::IIOSDR(SCPITransport* transport)
 	, m_txMaxToneFreq(0)
 	, m_hwCenterFreq(m_centerFreq)
 	, m_hwSampleRate(m_sampleRate)
+	, m_sweepStep(0)
+	, m_sweepRestart(true)
 {
 	//Conservative limits until we've looked at the radio
 	m_limits = { 70000000, 6000000000, 200000, 56000000, 2083334, 61440000, -3, 71 };
@@ -505,6 +514,7 @@ void IIOSDR::ApplyConfiguration()
 	bool doRate;
 	bool doSpan;
 	bool doFreq;
+	bool sweep;
 	int64_t freq;
 	int64_t span;
 	uint64_t rate;
@@ -530,6 +540,13 @@ void IIOSDR::ApplyConfiguration()
 		m_sampleRateDirty = false;
 		m_spanDirty = false;
 		m_centerFreqDirty = false;
+
+		//Changing the sample rate can start or stop a sweep, and when sweeping the analog bandwidth follows it.
+		//The LO is moved around by AcquireData() while sweeping, so has to go back to the center when we stop.
+		sweep = IsSweeping(span, rate);
+		doSpan |= doRate;
+		if(!sweep)
+			doFreq |= doSpan;
 
 		any = doRate || doSpan || doFreq;
 		for(size_t i=0; i<m_numRx; i++)
@@ -581,8 +598,11 @@ void IIOSDR::ApplyConfiguration()
 	if(doRate)
 		m_ctx->WriteChannelAttrInt(g_phyDevice, "voltage0", false, "sampling_frequency", rate);
 	if(doSpan)
-		m_ctx->WriteChannelAttrInt(g_phyDevice, "voltage0", false, "rf_bandwidth", span);
-	if(doFreq)
+	{
+		int64_t bw = sweep ? GetCaptureBandwidth(rate) : span;
+		m_ctx->WriteChannelAttrInt(g_phyDevice, "voltage0", false, "rf_bandwidth", bw);
+	}
+	if(doFreq && !sweep)
 		m_ctx->WriteChannelAttrInt(g_phyDevice, "altvoltage0", true, "frequency", freq);
 	if(doTxLo)
 		m_ctx->WriteChannelAttrInt(g_phyDevice, "altvoltage1", true, "frequency", txLo);
@@ -653,13 +673,14 @@ void IIOSDR::ApplyConfiguration()
 		haveTones[n] = ReadTone(txPending[n].first, txPending[n].second, hwTones[n]);
 
 	lock_guard<recursive_mutex> lock(m_cacheMutex);
+	//When sweeping, neither the LO nor the analog bandwidth are the center frequency and span
 	if(haveFreq)
 	{
 		m_hwCenterFreq = hwFreq;
-		if(!m_centerFreqDirty)
+		if(!m_centerFreqDirty && !sweep)
 			m_centerFreq = hwFreq;
 	}
-	if(haveSpan && !m_spanDirty)
+	if(haveSpan && !m_spanDirty && !sweep)
 		m_span = hwSpan;
 	if(haveRate)
 	{
@@ -1016,9 +1037,82 @@ vector<uint64_t> IIOSDR::GetSampleDepthsNonInterleaved()
 
 void IIOSDR::SetSpan(int64_t span)
 {
+	//Anything wider than we can capture at once is swept, up to the whole tuning range
 	lock_guard<recursive_mutex> lock(m_cacheMutex);
-	m_span = min(max(span, m_limits.minBandwidth), m_limits.maxBandwidth);
+	int64_t maxSpan = m_limits.maxCenterFreq - m_limits.minCenterFreq + m_limits.maxBandwidth;
+	m_span = min(max(span, m_limits.minBandwidth), maxSpan);
 	m_spanDirty = true;
+}
+
+/**
+	@brief Gets the width of the spectrum we can capture at once at a given sample rate
+
+	@param rate	Sample rate in Hz
+ */
+int64_t IIOSDR::GetCaptureBandwidth(uint64_t rate)
+{
+	return min(max(static_cast<int64_t>(rate), m_limits.minBandwidth), m_limits.maxBandwidth);
+}
+
+/**
+	@brief Checks if a span is too wide to capture at once, so we have to sweep the LO across it
+
+	@param span	Span in Hz
+	@param rate	Sample rate in Hz
+ */
+bool IIOSDR::IsSweeping(int64_t span, uint64_t rate)
+{
+	return span > GetCaptureBandwidth(rate);
+}
+
+/**
+	@brief Works out the LO frequencies to sweep across a span, in ascending order
+
+	The step is a whole number of FFT bins (for an FFT the length of a capture), so that the bins of adjacent
+	captures line up. The first and last captures are centered on the span, and may go a little past the ends of it.
+
+	@param center	Center of the span in Hz
+	@param span		Width of the span in Hz
+	@param rate		Sample rate in Hz
+	@param depth	Number of samples per capture
+ */
+vector<int64_t> IIOSDR::GetSweepFrequencies(int64_t center, int64_t span, uint64_t rate, size_t depth)
+{
+	double bin = static_cast<double>(rate) / depth;
+	double step = max(1.0, floor(GetCaptureBandwidth(rate) * g_sweepStepFraction / bin)) * bin;
+	size_t n = ceil(span / step);
+
+	//Steps past the end of the tuning range all end up at the end, so skip duplicates
+	vector<int64_t> ret;
+	for(size_t i=0; i<n; i++)
+	{
+		int64_t f = llround(center + (i - (n - 1) / 2.0) * step);
+		f = min(max(f, m_limits.minCenterFreq), m_limits.maxCenterFreq);
+		if(ret.empty() || (f > ret.back()) )
+			ret.push_back(f);
+	}
+	return ret;
+}
+
+/**
+	@brief Moves the RX LO in the middle of a sweep, and waits for it to settle
+
+	Only called from the instrument thread.
+
+	@param freq	New LO frequency in Hz
+ */
+void IIOSDR::Retune(int64_t freq)
+{
+	m_ctx->WriteChannelAttrInt(g_phyDevice, "altvoltage0", true, "frequency", freq);
+
+	//The synthesizer can't necessarily hit the exact frequency
+	int64_t hwFreq;
+	if(m_ctx->ReadChannelAttrInt(g_phyDevice, "altvoltage0", true, "frequency", hwFreq))
+		m_hwCenterFreq = hwFreq;
+	else
+		m_hwCenterFreq = freq;
+
+	this_thread::sleep_for(g_sweepSettleTime);
 }
 
 int64_t IIOSDR::GetSpan()
@@ -1046,12 +1140,14 @@ int64_t IIOSDR::GetCenterFrequency(size_t /*channel*/)
 
 void IIOSDR::Start()
 {
+	m_sweepRestart = true;
 	m_triggerArmed = true;
 	m_triggerOneShot = false;
 }
 
 void IIOSDR::StartSingleTrigger()
 {
+	m_sweepRestart = true;
 	m_triggerArmed = true;
 	m_triggerOneShot = true;
 }
@@ -1064,6 +1160,7 @@ void IIOSDR::Stop()
 void IIOSDR::ForceTrigger()
 {
 	//No trigger, so this is the same as a single capture
+	m_sweepRestart = true;
 	m_triggerArmed = true;
 	m_triggerOneShot = true;
 }
@@ -1118,9 +1215,13 @@ bool IIOSDR::AcquireData()
 	vector<size_t> paths;
 	vector<string> iioChannels;
 	size_t depth;
+	int64_t span;
+	int64_t center;
 	{
 		lock_guard<recursive_mutex> lock(m_cacheMutex);
 		depth = m_sampleDepth;
+		span = m_span;
+		center = m_centerFreq;
 		for(size_t i=0; i<m_numRx; i++)
 		{
 			if(!m_channelEnabled[i])
@@ -1132,6 +1233,27 @@ bool IIOSDR::AcquireData()
 	}
 	if(paths.empty())
 		return false;
+
+	//If the span is too wide to capture at once, move on to the next step of the sweep.
+	//Start over at the beginning if the sweep finished, or if the user changed it.
+	bool sweepDone = true;
+	if(IsSweeping(span, m_hwSampleRate))
+	{
+		auto freqs = GetSweepFrequencies(center, span, m_hwSampleRate, depth);
+		if(m_sweepRestart.exchange(false) || (freqs != m_sweepFreqs) || (m_sweepStep >= freqs.size()) )
+		{
+			m_sweepFreqs = freqs;
+			m_sweepStep = 0;
+		}
+
+		int64_t lo = m_sweepFreqs[m_sweepStep];
+		m_sweepStep ++;
+		sweepDone = (m_sweepStep >= m_sweepFreqs.size());
+		if(lo != m_hwCenterFreq)
+			Retune(lo);
+	}
+	else
+		m_sweepFreqs.clear();
 
 	//Sample rate and LO are not necessarily what the user last asked for, they're what's in the hardware now.
 	//(only this thread applies configuration, so these can't change during the capture)
@@ -1192,8 +1314,8 @@ bool IIOSDR::AcquireData()
 	m_pendingWaveforms.push_back(s);
 	m_pendingWaveformsMutex.unlock();
 
-	//If this was a one-shot trigger we're no longer armed
-	if(m_triggerOneShot)
+	//If this was a one-shot trigger we're no longer armed (once we've been all the way across the sweep)
+	if(m_triggerOneShot && sweepDone)
 		m_triggerArmed = false;
 
 	return true;

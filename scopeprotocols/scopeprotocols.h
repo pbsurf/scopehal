@@ -204,6 +204,7 @@
 #include "SParameterCascadeFilter.h"
 #include "SParameterDeEmbedFilter.h"
 #include "SpectrogramFilter.h"
+#include "SpectrumStitchFilter.h"
 #include "SPIDecoder.h"
 #include "SPIFlashDecoder.h"
 #include "SquelchFilter.h"

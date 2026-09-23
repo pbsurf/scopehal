@@ -204,6 +204,7 @@ void ScopeProtocolStaticInit()
 	AddDecoderClass(SParameterCascadeFilter);
 	AddDecoderClass(SParameterDeEmbedFilter);
 	AddDecoderClass(SpectrogramFilter);
+	AddDecoderClass(SpectrumStitchFilter);
 	AddDecoderClass(SPIDecoder);
 	AddDecoderClass(SPIFlashDecoder);
 	AddDecoderClass(SquelchFilter);

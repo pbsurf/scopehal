@@ -166,6 +166,7 @@ set(SCOPEPROTOCOLS_SOURCES
 	SParameterCascadeFilter.cpp
 	SParameterDeEmbedFilter.cpp
 	SpectrogramFilter.cpp
+	SpectrumStitchFilter.cpp
 	SPIDecoder.cpp
 	SPIFlashDecoder.cpp
 	SquelchFilter.cpp
