@@ -79,7 +79,8 @@ public:
 	enum DetectorType
 	{
 		DETECTOR_NORMAL = 0,
-		DETECTOR_PEAK = 1
+		DETECTOR_PEAK = 1,
+		DETECTOR_AVERAGE = 2
 	};
 
 	PROTOCOL_DECODER_INITPROC(FFTFilter)

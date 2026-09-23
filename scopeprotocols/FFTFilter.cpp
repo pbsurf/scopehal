@@ -70,6 +70,7 @@ FFTFilter::FFTFilter(const string& color)
 	m_parameters[m_detectorName] = FilterParameter(FilterParameter::TYPE_ENUM, Unit(Unit::UNIT_COUNTS));
 	m_parameters[m_detectorName].AddEnumValue("Normal", DETECTOR_NORMAL);
 	m_parameters[m_detectorName].AddEnumValue("Peak", DETECTOR_PEAK);
+	m_parameters[m_detectorName].AddEnumValue("Average", DETECTOR_AVERAGE);
 	m_parameters[m_detectorName].SetIntVal(DETECTOR_NORMAL);
 }
 
