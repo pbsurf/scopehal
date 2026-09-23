@@ -36,6 +36,7 @@
 
 #include "../scopehal/scopehal.h"
 #include "SpectrumStitchFilter.h"
+#include "FFTFilter.h"
 
 using namespace std;
 
@@ -60,6 +61,7 @@ SpectrumStitchFilter::SpectrumStitchFilter(const string& color)
 	: PeakDetectionFilter(color, CAT_RF)
 	, m_usableBandwidth(m_parameters["Usable Bandwidth"])
 	, m_dcNotch(m_parameters["DC Notch"])
+	, m_detector(m_parameters["Detector"])
 {
 	AddStream(Unit(Unit::UNIT_DBM), "data", Stream::STREAM_TYPE_ANALOG);
 	CreateInput<InputConstraintStreamType>("din", Stream::STREAM_TYPE_ANALOG);
@@ -70,6 +72,13 @@ SpectrumStitchFilter::SpectrumStitchFilter(const string& color)
 
 	m_dcNotch = FilterParameter(FilterParameter::TYPE_FLOAT, Unit(Unit::UNIT_HZ));
 	m_dcNotch.SetFloatVal(0);
+
+	//Only used by the renderer, same values as the FFT filter
+	m_detector = FilterParameter(FilterParameter::TYPE_ENUM, Unit(Unit::UNIT_COUNTS));
+	m_detector.AddEnumValue("Normal", FFTFilter::DETECTOR_NORMAL);
+	m_detector.AddEnumValue("Peak", FFTFilter::DETECTOR_PEAK);
+	m_detector.AddEnumValue("Average", FFTFilter::DETECTOR_AVERAGE);
+	m_detector.SetIntVal(FFTFilter::DETECTOR_NORMAL);
 
 	Reset();
 }

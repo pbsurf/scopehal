@@ -52,6 +52,9 @@
 	the edges. Where captures overlap, each output bin comes from the capture whose center is closest to it. There is
 	often a spike at the LO frequency from DC offset and LO leakage, which can be interpolated over ("DC Notch").
 
+	A stitched span can have far more bins than there are pixels, so like the FFT filter there is a "Detector" setting
+	which picks how the bins in each pixel are drawn.
+
 	If all the inputs are at the same center frequency, each one is a new sweep, so this just passes through the
 	usable part of the spectrum.
  */
@@ -76,6 +79,7 @@ protected:
 
 	FilterParameter& m_usableBandwidth;
 	FilterParameter& m_dcNotch;
+	FilterParameter& m_detector;
 
 	///@brief Width of a frequency bin, in X axis units (zero if we have no data)
 	int64_t m_binWidth;
