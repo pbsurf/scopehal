@@ -351,6 +351,10 @@ bool VulkanInitInstance(
 		SDL_GetVersion(&ver);
 		LogDebug("Initializing SDL %d.%d.%d\n", ver.major, ver.minor, ver.patch);
 
+		//Don't ask the X11 compositor to disable compositing for our windows (SDL defaults to requesting bypass).
+		//Otherwise KWin suspends compositing desktop-wide whenever a viewport window is created.
+		SDL_SetHint(SDL_HINT_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR, "0");
+
 		//Initialize SDL
 		if(SDL_Init(SDL_INIT_VIDEO) != 0)
 		{
