@@ -48,11 +48,16 @@ using namespace std;
 IIOLibContext::IIOLibContext(const string& uri, iio_context* ctx)
 	: m_uri(uri)
 	, m_ctx(ctx)
+	, m_rxBuf(nullptr)
+	, m_rxDepth(0)
+	, m_rxKernelBuffers(0)
 {
 }
 
 IIOLibContext::~IIOLibContext()
 {
+	//The buffer belongs to the context, so has to go first
+	StopCapture();
 	iio_context_destroy(m_ctx);
 }
 
@@ -289,10 +294,70 @@ bool IIOLibContext::CaptureBlock(
 	const string& dev,
 	const vector<string>& channels,
 	size_t depth,
+	size_t kernelBuffers,
+	size_t discard,
 	vector<vector<int16_t> >& data)
 {
 	lock_guard<recursive_mutex> lock(m_mutex);
 
+	//Set up a new buffer if we don't have one for this capture already.
+	//(a new buffer has nothing out of date in it, so there's nothing to discard)
+	if( !m_rxBuf || (dev != m_rxDevName) || (channels != m_rxChannelNames) || (depth != m_rxDepth) ||
+		(kernelBuffers != m_rxKernelBuffers) )
+	{
+		StopCapture();
+		if(!StartCapture(dev, channels, depth, kernelBuffers))
+			return false;
+		discard = 0;
+	}
+
+	//Throw away anything that's out of date, then keep the last block
+	for(size_t i=0; i<=discard; i++)
+	{
+		auto ret = iio_buffer_refill(m_rxBuf);
+		if(ret < 0)
+		{
+			//Start over with a new buffer next time, in case this one is broken
+			LogError("Failed to read IIO buffer from %s: %s\n", dev.c_str(), strerror(-ret));
+			StopCapture();
+			return false;
+		}
+	}
+
+	data.clear();
+	data.resize(m_rxChannels.size());
+	for(size_t i=0; i<m_rxChannels.size(); i++)
+	{
+		data[i].resize(depth);
+		size_t expected = depth * sizeof(int16_t);
+		size_t got = iio_channel_read(m_rxChannels[i], m_rxBuf, data[i].data(), expected);
+		if(got != expected)
+		{
+			LogError("Short read from IIO channel %s/%s (got %zu of %zu bytes)\n",
+				dev.c_str(), channels[i].c_str(), got, expected);
+			return false;
+		}
+	}
+
+	return true;
+}
+
+/**
+	@brief Enables the channels to capture and opens a buffer for them
+
+	@param dev				Device to capture from
+	@param channels			Channel IDs to capture
+	@param depth			Number of samples per block
+	@param kernelBuffers	Number of blocks the kernel can queue up
+
+	@return					True on success, false on failure (details are logged)
+ */
+bool IIOLibContext::StartCapture(
+	const string& dev,
+	const vector<string>& channels,
+	size_t depth,
+	size_t kernelBuffers)
+{
 	auto d = iio_context_find_device(m_ctx, dev.c_str());
 	if(!d)
 	{
@@ -329,43 +394,46 @@ bool IIOLibContext::CaptureBlock(
 	for(auto c : chans)
 		iio_channel_enable(c);
 
-	bool ok = false;
+	//Not fatal if the device won't take this many, it'll just use what it has
+	auto ret = iio_device_set_kernel_buffers_count(d, kernelBuffers);
+	if(ret < 0)
+		LogWarning("Couldn't use %zu kernel buffers for %s: %s\n", kernelBuffers, dev.c_str(), strerror(-ret));
+
 	errno = 0;
 	auto buf = iio_device_create_buffer(d, depth, false);
 	if(!buf)
-		LogError("Failed to create IIO buffer for %s (%zu samples): %s\n", dev.c_str(), depth, strerror(errno));
-	else
 	{
-		auto ret = iio_buffer_refill(buf);
-		if(ret < 0)
-			LogError("Failed to read IIO buffer from %s: %s\n", dev.c_str(), strerror(-ret));
-		else
-		{
-			ok = true;
-			data.clear();
-			data.resize(chans.size());
-			for(size_t i=0; i<chans.size(); i++)
-			{
-				data[i].resize(depth);
-				size_t expected = depth * sizeof(int16_t);
-				size_t got = iio_channel_read(chans[i], buf, data[i].data(), expected);
-				if(got != expected)
-				{
-					LogError("Short read from IIO channel %s/%s (got %zu of %zu bytes)\n",
-						dev.c_str(), channels[i].c_str(), got, expected);
-					ok = false;
-					break;
-				}
-			}
-		}
-
-		iio_buffer_destroy(buf);
+		LogError("Failed to create IIO buffer for %s (%zu samples): %s\n", dev.c_str(), depth, strerror(errno));
+		for(auto c : chans)
+			iio_channel_disable(c);
+		return false;
 	}
 
-	for(auto c : chans)
+	m_rxBuf = buf;
+	m_rxDevName = dev;
+	m_rxChannelNames = channels;
+	m_rxChannels = chans;
+	m_rxDepth = depth;
+	m_rxKernelBuffers = kernelBuffers;
+	return true;
+}
+
+void IIOLibContext::StopCapture()
+{
+	lock_guard<recursive_mutex> lock(m_mutex);
+	if(!m_rxBuf)
+		return;
+
+	iio_buffer_destroy(m_rxBuf);
+	for(auto c : m_rxChannels)
 		iio_channel_disable(c);
 
-	return ok;
+	m_rxBuf = nullptr;
+	m_rxDevName.clear();
+	m_rxChannelNames.clear();
+	m_rxChannels.clear();
+	m_rxDepth = 0;
+	m_rxKernelBuffers = 0;
 }
 
 #endif

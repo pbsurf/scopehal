@@ -465,10 +465,17 @@ static const MockTone g_mockTones[] =
 	{ 2437000000, 0.30 }
 };
 
+/**
+	@brief Synthesizes a block of samples
+
+	There's no buffer, samples are generated on demand, so they're never out of date and there's nothing to discard.
+ */
 bool IIOMockContext::CaptureBlock(
 	const string& dev,
 	const vector<string>& channels,
 	size_t depth,
+	size_t /*kernelBuffers*/,
+	size_t /*discard*/,
 	vector<vector<int16_t> >& data)
 {
 	if(dev != g_rxData)
@@ -583,6 +590,11 @@ bool IIOMockContext::CaptureBlock(
 	}
 
 	return true;
+}
+
+void IIOMockContext::StopCapture()
+{
+	//Nothing to do, we don't keep a buffer open
 }
 
 #endif

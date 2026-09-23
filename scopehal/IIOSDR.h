@@ -60,6 +60,10 @@
 	the spectra line up. Use the Spectrum Stitch filter on the output of a Complex FFT to put the pieces together.
 	In single trigger mode, the radio stays armed until it has been through the whole sweep.
 
+	The capture buffer is kept open while the trigger is armed, since setting one up takes much longer than a capture.
+	Samples queued in it from before a settings change are thrown away. While sweeping, the radio only gets one
+	kernel buffer, so it only captures a block when we ask for one and nothing has to be thrown away after a retune.
+
 	@ingroup sdrdrivers
  */
 class IIOSDR
@@ -246,6 +250,9 @@ protected:
 
 	///@brief Set when the trigger is armed, to start the next capture at the beginning of the sweep
 	std::atomic<bool> m_sweepRestart;
+
+	///@brief Set when samples already queued in the capture buffer are out of date and have to be thrown away
+	std::atomic<bool> m_flushCapture;
 
 public:
 	static std::string GetDriverNameInternal();

@@ -113,22 +113,35 @@ public:
 	/**
 		@brief Captures a block of samples from a buffer-capable device
 
-		This blocks until the samples have been received. Channels are enabled for the duration of the call and
-		then disabled again, and a fresh buffer is used each time so the data is always newly acquired.
+		This blocks until the samples have been received.
 
-		@param dev			Device to capture from (e.g. cf-ad9361-lpc)
-		@param channels		Channel IDs to capture (e.g. voltage0, voltage1). All must be 16 bit input channels.
-		@param depth		Number of samples to capture from each channel
-		@param data			Output samples, one vector per channel in the same order as channels. These are converted
-							to host format, so for a 12 bit ADC they range from -2048 to 2047.
+		Setting up a buffer is slow, so it's kept open between calls with the same device, channels, depth, and
+		number of kernel buffers, and only rebuilt when one of them changes. While it's open the device keeps
+		capturing into the kernel buffers, so the samples returned may have been captured before this call (up to
+		one block per kernel buffer). If something changed that makes those out of date (such as the LO frequency),
+		use discard to throw them away. Call StopCapture() to close the buffer when not capturing.
 
-		@return				True on success, false on failure (details are logged)
+		@param dev				Device to capture from (e.g. cf-ad9361-lpc)
+		@param channels			Channel IDs to capture (e.g. voltage0, voltage1). All must be 16 bit input channels.
+		@param depth			Number of samples to capture from each channel
+		@param kernelBuffers	Number of blocks the kernel can queue up. More let the device keep capturing while
+								we're busy, fewer means less to throw away when the samples go out of date.
+		@param discard			Number of blocks to read and throw away first, if the buffer was already open
+		@param data				Output samples, one vector per channel in the same order as channels. These are
+								converted to host format, so for a 12 bit ADC they range from -2048 to 2047.
+
+		@return					True on success, false on failure (details are logged)
 	 */
 	virtual bool CaptureBlock(
 		const std::string& dev,
 		const std::vector<std::string>& channels,
 		size_t depth,
+		size_t kernelBuffers,
+		size_t discard,
 		std::vector<std::vector<int16_t> >& data) =0;
+
+	///@brief Closes the buffer CaptureBlock() keeps open, if there is one, so the device stops capturing
+	virtual void StopCapture() =0;
 
 	//Attribute access (typed convenience wrappers)
 	bool ReadChannelAttrInt(

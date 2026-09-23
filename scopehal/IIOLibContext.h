@@ -42,6 +42,8 @@
 #include "IIOContext.h"
 
 struct iio_context;
+struct iio_buffer;
+struct iio_channel;
 
 /**
 	@brief IIOContext implementation backed by libiio (0.x API)
@@ -83,16 +85,37 @@ public:
 		const std::string& dev,
 		const std::vector<std::string>& channels,
 		size_t depth,
+		size_t kernelBuffers,
+		size_t discard,
 		std::vector<std::vector<int16_t> >& data) override;
+	virtual void StopCapture() override;
 
 protected:
 	IIOLibContext(const std::string& uri, iio_context* ctx);
+
+	bool StartCapture(
+		const std::string& dev,
+		const std::vector<std::string>& channels,
+		size_t depth,
+		size_t kernelBuffers);
 
 	std::string m_uri;
 	iio_context* m_ctx;
 
 	///@brief Serializes all access to the libiio context
 	std::recursive_mutex m_mutex;
+
+	///@brief Buffer kept open between captures (nullptr if there isn't one)
+	iio_buffer* m_rxBuf;
+
+	///@brief What m_rxBuf was set up for, so we know when it has to be rebuilt
+	std::string m_rxDevName;
+	std::vector<std::string> m_rxChannelNames;
+	size_t m_rxDepth;
+	size_t m_rxKernelBuffers;
+
+	///@brief Channels enabled for m_rxBuf, in the same order as m_rxChannelNames
+	std::vector<iio_channel*> m_rxChannels;
 };
 
 #endif

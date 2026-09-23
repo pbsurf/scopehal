@@ -91,7 +91,10 @@ public:
 		const std::string& dev,
 		const std::vector<std::string>& channels,
 		size_t depth,
+		size_t kernelBuffers,
+		size_t discard,
 		std::vector<std::vector<int16_t> >& data) override;
+	virtual void StopCapture() override;
 
 protected:
 	///@brief Model-specific parameters

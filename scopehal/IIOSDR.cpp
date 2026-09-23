@@ -63,6 +63,16 @@ static const double g_sweepStepFraction = 0.8;
 //How long to let the synthesizer settle after moving the LO during a sweep
 static const chrono::microseconds g_sweepSettleTime(1000);
 
+//Number of blocks the kernel can queue up while capturing. When not sweeping, more let the radio keep capturing while
+//we're busy (this is the libiio default). When sweeping, anything queued up before a retune would be at the old LO.
+static const size_t g_kernelBuffers = 4;
+static const size_t g_sweepKernelBuffers = 1;
+
+//How many blocks to throw away after a retune when sweeping. With one kernel buffer the radio only captures a block
+//once it's asked for, so nothing queued is from before the retune. (Checked on a Pluto by sweeping across a looped back
+//TX tone: no copies of it one LO step away. If they ever show up, set this to g_sweepKernelBuffers.)
+static const size_t g_sweepDiscard = 0;
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Construction / destruction
 
@@ -96,6 +106,7 @@ IIOSDR::IIOSDR(SCPITransport* transport)
 	, m_hwSampleRate(m_sampleRate)
 	, m_sweepStep(0)
 	, m_sweepRestart(true)
+	, m_flushCapture(false)
 {
 	//Conservative limits until we've looked at the radio
 	m_limits = { 70000000, 6000000000, 200000, 56000000, 2083334, 61440000, -3, 71 };
@@ -497,6 +508,12 @@ void IIOSDR::ReadHardwareConfiguration()
 void IIOSDR::BackgroundProcessing()
 {
 	SCPIInstrument::BackgroundProcessing();
+
+	//Don't leave the radio capturing into a buffer nobody is reading (this is done here, not in Stop(), so the GUI
+	//thread never has to wait for a capture to finish)
+	if(m_ctx && !m_triggerArmed)
+		m_ctx->StopCapture();
+
 	ApplyConfiguration();
 }
 
@@ -592,6 +609,16 @@ void IIOSDR::ApplyConfiguration()
 
 	if(!any)
 		return;
+
+	//Anything captured before an RX setting changed is out of date. Changing the sample rate reconfigures the whole
+	//clock chain, so don't do that with the buffer open.
+	bool rxChanged = doRate || doSpan || doFreq;
+	for(size_t i=0; i<m_numRx; i++)
+		rxChanged |= doGainMode[i] || doGain[i];
+	if(doRate)
+		m_ctx->StopCapture();
+	else if(rxChanged)
+		m_flushCapture = true;
 
 	//Changing the sample rate can change the analog bandwidth, so do it first
 	//(failures are logged by the context, and we resync from the hardware below)
@@ -1141,6 +1168,7 @@ int64_t IIOSDR::GetCenterFrequency(size_t /*channel*/)
 void IIOSDR::Start()
 {
 	m_sweepRestart = true;
+	m_flushCapture = true;
 	m_triggerArmed = true;
 	m_triggerOneShot = false;
 }
@@ -1148,6 +1176,7 @@ void IIOSDR::Start()
 void IIOSDR::StartSingleTrigger()
 {
 	m_sweepRestart = true;
+	m_flushCapture = true;
 	m_triggerArmed = true;
 	m_triggerOneShot = true;
 }
@@ -1161,6 +1190,7 @@ void IIOSDR::ForceTrigger()
 {
 	//No trigger, so this is the same as a single capture
 	m_sweepRestart = true;
+	m_flushCapture = true;
 	m_triggerArmed = true;
 	m_triggerOneShot = true;
 }
@@ -1237,7 +1267,9 @@ bool IIOSDR::AcquireData()
 	//If the span is too wide to capture at once, move on to the next step of the sweep.
 	//Start over at the beginning if the sweep finished, or if the user changed it.
 	bool sweepDone = true;
-	if(IsSweeping(span, m_hwSampleRate))
+	bool sweeping = IsSweeping(span, m_hwSampleRate);
+	bool flush = m_flushCapture.exchange(false);
+	if(sweeping)
 	{
 		auto freqs = GetSweepFrequencies(center, span, m_hwSampleRate, depth);
 		if(m_sweepRestart.exchange(false) || (freqs != m_sweepFreqs) || (m_sweepStep >= freqs.size()) )
@@ -1250,10 +1282,19 @@ bool IIOSDR::AcquireData()
 		m_sweepStep ++;
 		sweepDone = (m_sweepStep >= m_sweepFreqs.size());
 		if(lo != m_hwCenterFreq)
+		{
 			Retune(lo);
+			flush = true;
+		}
 	}
 	else
 		m_sweepFreqs.clear();
+
+	//If what's already in the buffer is out of date, throw all of it away
+	size_t kernelBuffers = sweeping ? g_sweepKernelBuffers : g_kernelBuffers;
+	size_t discard = 0;
+	if(flush)
+		discard = sweeping ? g_sweepDiscard : kernelBuffers;
 
 	//Sample rate and LO are not necessarily what the user last asked for, they're what's in the hardware now.
 	//(only this thread applies configuration, so these can't change during the capture)
@@ -1262,7 +1303,7 @@ bool IIOSDR::AcquireData()
 	int64_t fs_per_sample = FS_PER_SECOND / m_hwSampleRate;
 
 	vector<vector<int16_t> > data;
-	if(!m_ctx->CaptureBlock(g_rxDevice, iioChannels, depth, data))
+	if(!m_ctx->CaptureBlock(g_rxDevice, iioChannels, depth, kernelBuffers, discard, data))
 	{
 		//Don't spin on a failing capture, stop and let the user sort it out
 		LogError("IIO capture failed, stopping acquisition\n");
