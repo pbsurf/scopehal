@@ -146,8 +146,10 @@ void Waterfall::Refresh(vk::raii::CommandBuffer& cmdBuf, [[maybe_unused]] shared
 	//Figure out the frequency span of the input
 	int64_t spanIn = din->m_timescale * inlen;
 
-	//Recalculate timescale and update timestamps
+	//Recalculate timescale and update timestamps.
+	//Keep the input's start frequency (nonzero for a complex FFT, where the first bin is center minus half the span)
 	cap->m_timescale = spanIn / capwidth;
+	cap->m_triggerPhase = din->m_triggerPhase;
 	cap->m_startTimestamp = din->m_startTimestamp;
 	cap->m_startFemtoseconds = din->m_startFemtoseconds;
 
