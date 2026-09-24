@@ -101,7 +101,7 @@ public:
 			ssize_t nend = nouts-1;
 			size_t minpeak = 10;		//Skip this many bins at left to avoid false positives on the DC peak
 										//(TODO: this only makes sense for FFT)
-			for(ssize_t i=minpeak; i<(ssize_t)nouts; i++)
+			for(ssize_t i=minpeak; i<nend; i++)
 			{
 				//Locate the peak
 				ssize_t left = std::max((ssize_t)minpeak, (ssize_t)(i - search_rad));
@@ -220,10 +220,19 @@ protected:
 		PeakDetector::FindPeaks(
 			cap,
 			m_numpeaks.GetIntVal(),
-			m_peakwindow.GetFloatVal(),
+			GetPeakWindow(),
 			GetYAxisUnits(0).IsLogarithmic(),
 			cmdBuf,
 			queue);
+	}
+
+	///@brief Gets the Peak Window parameter (in Hz) in X axis units
+	float GetPeakWindow()
+	{
+		float window = m_peakwindow.GetFloatVal();
+		if(m_xAxisUnit.GetType() == Unit::UNIT_MICROHZ)
+			window *= 1e6;
+		return window;
 	}
 
 	FilterParameter& m_numpeaks;
