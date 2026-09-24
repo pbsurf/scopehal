@@ -1377,6 +1377,33 @@ bool Unit::StepNumericText(const string& text, int cursor, bool increment, strin
 }
 
 /**
+	@brief Checks if the rest of a string is just the unit, with no SI prefix
+
+	Some units start with a letter that is also a prefix, like "m" for meters or "mV" for UNIT_MILLIVOLTS, so "2 m" is
+	two meters rather than two millimeters.
+
+	@param str		String being parsed
+	@param start	Index of the first character after the number
+
+	@return			True if everything from start on, ignoring trailing whitespace, is the unit's suffix
+ */
+bool Unit::IsUnitSuffix(const string& str, size_t start) const
+{
+	double scaleFactor = 1;
+	string prefix;
+	string numprefix;
+	string suffix;
+	GetUnitSuffix(m_type, 1, scaleFactor, prefix, numprefix, suffix);
+	if(suffix.empty())
+		return false;
+
+	size_t end = str.size();
+	while( (end > start) && isspace(static_cast<unsigned char>(str[end-1])) )
+		end --;
+	return str.compare(start, end - start, suffix) == 0;
+}
+
+/**
 	@brief Parses a string based on the supplied unit
 
 	@param str					The string to parse
@@ -1410,6 +1437,10 @@ double Unit::ParseString(const string& str, bool useDisplayLocale)
 			char c = str[i];
 			if(isspace(c) || isdigit(c) || (c == '.') || (c == ',') || (c == '-') )
 				continue;
+
+			//The unit on its own (like "m" for meters) is not a prefix
+			if(IsUnitSuffix(str, i))
+				break;
 
 			if(c == 'T')
 			{
@@ -1561,6 +1592,9 @@ int64_t Unit::ParseStringInt64(const string& str, bool useDisplayLocale)
 				foundDecimal = true;
 				continue;
 			}
+			//The unit on its own (like "m" for meters) is not a prefix
+			else if(IsUnitSuffix(str, i))
+				break;
 			else if(c == 'T')
 			{
 				if(m_type == UNIT_BYTES)

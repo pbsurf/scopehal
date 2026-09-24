@@ -162,6 +162,7 @@ protected:
 
 	void GetSIScalingFactor(double num, double& scaleFactor, std::string& prefix) const;
 	void GetUnitSuffix(UnitType type, double num, double& scaleFactor, std::string& prefix, std::string& numprefix, std::string& suffix) const;
+	bool IsUnitSuffix(const std::string& str, size_t start) const;
 
 #ifdef _WIN32
 	/**
