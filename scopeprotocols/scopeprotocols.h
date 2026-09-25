@@ -133,6 +133,7 @@
 #include "GroupDelayFilter.h"
 #include "HistogramFilter.h"
 #include "HorizontalBathtub.h"
+#include "HTTPExportFilter.h"
 #include "HyperRAMDecoder.h"
 #include "I2CDecoder.h"
 #include "I2CEepromDecoder.h"

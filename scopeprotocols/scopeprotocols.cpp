@@ -133,6 +133,7 @@ void ScopeProtocolStaticInit()
 	AddDecoderClass(GroupDelayFilter);
 	AddDecoderClass(HistogramFilter);
 	AddDecoderClass(HorizontalBathtub);
+	AddDecoderClass(HTTPExportFilter);
 	AddDecoderClass(HyperRAMDecoder);
 	AddDecoderClass(I2CDecoder);
 	AddDecoderClass(I2CEepromDecoder);

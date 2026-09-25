@@ -94,6 +94,7 @@ set(SCOPEPROTOCOLS_SOURCES
 	GroupDelayFilter.cpp
 	HistogramFilter.cpp
 	HorizontalBathtub.cpp
+	HTTPExportFilter.cpp
 	HyperRAMDecoder.cpp
 	I2CDecoder.cpp
 	I2CEepromDecoder.cpp
@@ -221,6 +222,7 @@ add_library(scopeprotocols SHARED
 target_link_libraries(scopeprotocols
 	scopehal
 	ZLIB::ZLIB
+	Threads::Threads
 	)
 
 target_include_directories(scopeprotocols
