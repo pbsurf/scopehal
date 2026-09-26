@@ -202,7 +202,7 @@ public:
 	}
 
 	///@brief Gets the value of a scalar data stream
-	float GetScalarValue(size_t stream)
+	double GetScalarValue(size_t stream)
 	{
 		if(stream >= m_streams.size())
 			return 0;
@@ -210,7 +210,7 @@ public:
 	}
 
 	///@brief Sets the value of a scalar data stream
-	void SetScalarValue(size_t stream, float value)
+	void SetScalarValue(size_t stream, double value)
 	{
 		if(stream >= m_streams.size())
 			return;

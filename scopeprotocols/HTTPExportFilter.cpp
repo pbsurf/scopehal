@@ -575,13 +575,14 @@ void HTTPExportFilter::Refresh(
 	{
 		value = din.GetScalarValue();
 
-		//9 significant digits round-trips a float exactly. Spell non-finite values the way Prometheus expects.
+		//Scalars are doubles; 15 significant digits is the most that round-trips any decimal value.
+		//Spell non-finite values the way Prometheus expects.
 		if(isnan(value))
 			snprintf(text, sizeof(text), "NaN");
 		else if(isinf(value))
 			snprintf(text, sizeof(text), "%sInf", (value > 0) ? "+" : "-");
 		else
-			snprintf(text, sizeof(text), "%.9g", value);
+			snprintf(text, sizeof(text), "%.15g", value);
 	}
 
 	auto& server = HTTPExportServer::Get();

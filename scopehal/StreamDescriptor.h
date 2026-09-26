@@ -91,7 +91,7 @@ public:
 	void SetVoltageRange(float v);
 	void SetOffset(float v);
 	Stream::StreamType GetType();
-	float GetScalarValue();
+	double GetScalarValue();
 	uint64_t GetDigitalScalarValue();
 	size_t GetDigitalWidth();
 	std::string PrettyPrintDigitalScalarHex();
