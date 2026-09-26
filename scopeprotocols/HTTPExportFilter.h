@@ -37,6 +37,7 @@
 #define HTTPExportFilter_h
 
 #include <chrono>
+#include <condition_variable>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -45,7 +46,57 @@
 namespace httplib
 {
 	class Server;
+	struct Request;
+	struct Response;
 }
+
+/**
+	@brief Snapshot of an analog waveform, owned by HTTPExportServer and never modified after publication
+
+	Request handlers serialize it without holding any lock, so it must never refer to live waveform data.
+ */
+struct HTTPExportWaveform
+{
+	///@brief Time (or other X axis) units per offset tick, in m_xUnit
+	int64_t m_timescale = 0;
+
+	///@brief Offset of the first sample from the trigger, in m_xUnit
+	int64_t m_triggerPhase = 0;
+
+	///@brief Start of the acquisition, Unix time
+	time_t m_startTimestamp = 0;
+
+	///@brief Fractional part of the start time, in fs
+	int64_t m_startFemtoseconds = 0;
+
+	///@brief X axis unit of offsets, durations, timescale and trigger phase, ASCII (e.g. "fs", "uHz")
+	std::string m_xUnit;
+
+	///@brief Unit of m_xScale * X values (e.g. "s")
+	std::string m_xUnitScaled;
+
+	///@brief Multiplier converting X values from m_xUnit to m_xUnitScaled (e.g. 1e-15)
+	double m_xScale = 1;
+
+	///@brief Unit of the samples, ASCII (converted to SI like scalars, e.g. mV to V)
+	std::string m_yUnit;
+
+	///@brief True if the waveform has explicit offsets and durations
+	bool m_sparse = false;
+
+	///@brief Sample values
+	std::vector<float> m_samples;
+
+	///@brief Sample offsets in timescale units (sparse only)
+	std::vector<int64_t> m_offsets;
+
+	///@brief Sample durations in timescale units (sparse only)
+	std::vector<int64_t> m_durations;
+
+	///@brief X axis value of sample i, in m_xUnit
+	int64_t GetX(size_t i) const
+	{ return (m_sparse ? m_offsets[i] : static_cast<int64_t>(i)) * m_timescale + m_triggerPhase; }
+};
 
 /**
 	@brief Application-wide HTTP server publishing the latest values of all HTTPExportFilter instances
@@ -72,6 +123,8 @@ public:
 	bool Register(const std::string& key);
 	void Unregister(const std::string& key);
 	void Update(const std::string& key, double value, const std::string& text, const std::string& unit);
+	void UpdateWaveform(const std::string& key, std::shared_ptr<const HTTPExportWaveform> wfm);
+	bool IsWaveformWanted(const std::string& key);
 
 protected:
 	HTTPExportServer();
@@ -82,6 +135,14 @@ protected:
 	std::string ValueToJson(const std::string& key);
 	std::string AllValuesToJson();
 	std::string ValuesToPrometheus();
+
+	int GetWaveform(
+		const std::string& key,
+		double freshTimeout,
+		std::shared_ptr<const HTTPExportWaveform>& wfm,
+		uint64_t& seq,
+		std::chrono::system_clock::time_point& updated);
+	void HandleWaveformRequest(const httplib::Request& req, httplib::Response& res, const std::string& format);
 
 	///@brief A single published value
 	struct Entry
@@ -100,10 +161,22 @@ protected:
 
 		///@brief Wall clock time of the last update
 		std::chrono::system_clock::time_point m_updated;
+
+		///@brief Latest waveform, or null if the value is a scalar
+		std::shared_ptr<const HTTPExportWaveform> m_wfm;
+
+		///@brief True if a client asked for the waveform since the last copy
+		bool m_wfmWanted = false;
 	};
 
-	///@brief Mutex protecting m_entries. Request handlers take only this mutex.
+	///@brief Mutex protecting m_entries and m_stopping. Request handlers take only this mutex.
 	std::mutex m_entriesMutex;
+
+	///@brief Signalled when an entry is updated or removed, or the listener is stopping
+	std::condition_variable m_entriesChanged;
+
+	///@brief True while the listener is being stopped, so handlers waiting for a fresh waveform give up
+	bool m_stopping = false;
 
 	///@brief Published values, by key
 	std::map<std::string, Entry> m_entries;
@@ -131,7 +204,7 @@ protected:
 };
 
 /**
-	@brief Publishes a scalar value over HTTP, keyed by the filter's display name
+	@brief Publishes a scalar value or an analog waveform over HTTP, keyed by the filter's display name
  */
 class HTTPExportFilter : public Filter
 {
@@ -152,6 +225,7 @@ public:
 
 protected:
 	void UpdateRegistration();
+	void PublishWaveform(StreamDescriptor& din);
 
 	///@brief Mutex protecting m_key and m_registered
 	std::mutex m_keyMutex;

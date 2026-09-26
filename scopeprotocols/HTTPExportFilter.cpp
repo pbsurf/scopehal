@@ -40,9 +40,11 @@
 #include "../scopehal/scopehal.h"
 #include "HTTPExportFilter.h"
 
+#include <algorithm>
 #include <cctype>
 #include <cinttypes>
 #include <cmath>
+#include <cstring>
 #include <ctime>
 
 #ifndef _WIN32
@@ -54,9 +56,23 @@ using namespace std;
 //Only characters allowed in keys (so they can be used verbatim in URLs and never need escaping)
 static const char* g_keyPattern = "[A-Za-z0-9_-]+";
 
+//Largest waveform served as JSON or CSV (about 15 bytes per sample); bigger ones must use .npy
+static const size_t g_maxTextSamples = 1000000;
+
+//Longest a client may wait for a fresh waveform, in seconds
+static const double g_defaultFreshTimeout = 10;
+static const double g_maxFreshTimeout = 60;
+
 static string SanitizeKey(const string& name);
+static string AsciiUnitName(Unit unit);
+static void GetExportUnit(Unit unit, string& name, double& scale);
 static string JsonEscape(const string& s);
 static string FormatTimestamp(chrono::system_clock::time_point t);
+static string FormatAge(chrono::system_clock::time_point t, chrono::system_clock::time_point now = chrono::system_clock::now());
+static vector<pair<string, string>> WaveformMetadata(const HTTPExportWaveform& wfm);
+static string WaveformToJson(const HTTPExportWaveform& wfm);
+static string WaveformToCsv(const HTTPExportWaveform& wfm);
+static string NpyHeader(const HTTPExportWaveform& wfm);
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // HTTPExportServer
@@ -176,6 +192,7 @@ void HTTPExportServer::Unregister(const string& key)
 		m_entries.erase(key);
 		empty = m_entries.empty();
 	}
+	m_entriesChanged.notify_all();
 
 	if(empty)
 		Stop();
@@ -200,8 +217,49 @@ void HTTPExportServer::Update(const string& key, double value, const string& tex
 	e.m_value = value;
 	e.m_text = text;
 	e.m_unit = unit;
+	e.m_wfm = nullptr;
 	e.m_seq ++;
 	e.m_updated = chrono::system_clock::now();
+	m_entriesChanged.notify_all();
+}
+
+/**
+	@brief Publishes a new waveform for a registered key
+
+	@param key		Key to update
+	@param wfm		Snapshot of the waveform, must not be modified afterwards
+ */
+void HTTPExportServer::UpdateWaveform(const string& key, shared_ptr<const HTTPExportWaveform> wfm)
+{
+	lock_guard<mutex> lock(m_entriesMutex);
+	auto it = m_entries.find(key);
+	if(it == m_entries.end())
+		return;
+
+	auto& e = it->second;
+	e.m_value = 0;
+	e.m_text = "";
+	e.m_unit = wfm->m_yUnit;
+	e.m_wfm = wfm;
+	e.m_wfmWanted = false;
+	e.m_seq ++;
+	e.m_updated = chrono::system_clock::now();
+	m_entriesChanged.notify_all();
+}
+
+/**
+	@brief Checks whether a waveform should be copied for a key: a client asked for it, or there is no copy yet
+
+	Copying every acquisition would be wasteful when clients poll rarely, so the copy is made on demand. The first
+	request after a gap therefore returns an older acquisition, unless the client asks for a fresh one.
+ */
+bool HTTPExportServer::IsWaveformWanted(const string& key)
+{
+	lock_guard<mutex> lock(m_entriesMutex);
+	auto it = m_entries.find(key);
+	if(it == m_entries.end())
+		return false;
+	return it->second.m_wfmWanted || !it->second.m_wfm;
 }
 
 /**
@@ -245,6 +303,13 @@ void HTTPExportServer::Start()
 	server->Get("/metrics", [this](const httplib::Request&, httplib::Response& res)
 		{ res.set_content(ValuesToPrometheus(), "text/plain; version=0.0.4"); });
 
+	server->Get(string("/waveforms/(") + g_keyPattern + ")(?:\\.(json|csv|npy))?",
+		[this](const httplib::Request& req, httplib::Response& res)
+		{
+			string format = req.matches[2];
+			HandleWaveformRequest(req, res, format.empty() ? "json" : format);
+		});
+
 	if(!server->bind_to_port(m_host, m_port))
 	{
 		string err = string("Unable to listen on ") + m_host + ":" + to_string(m_port);
@@ -272,10 +337,22 @@ void HTTPExportServer::Stop()
 	if(!m_server)
 		return;
 
+	//Wake up handlers waiting for a fresh waveform, or stop() would wait for them to time out
+	{
+		lock_guard<mutex> lock(m_entriesMutex);
+		m_stopping = true;
+	}
+	m_entriesChanged.notify_all();
+
 	m_server->stop();
 	if(m_thread.joinable())
 		m_thread.join();
 	m_server = nullptr;
+
+	{
+		lock_guard<mutex> lock(m_entriesMutex);
+		m_stopping = false;
+	}
 
 	LogNotice("HTTP export: stopped listening\n");
 }
@@ -292,20 +369,213 @@ string HTTPExportServer::ValueToJson(const string& key)
 
 	auto& e = it->second;
 
-	//JSON has no representation for NaN or infinity
-	string value = "null";
-	if(!e.m_text.empty() && isfinite(e.m_value))
-		value = e.m_text;
-
-	string ret = string("{\"value\":") + value + ",\"unit\":\"" + JsonEscape(e.m_unit) + "\",\"seq\":" + to_string(e.m_seq);
-	if(e.m_seq != 0)
+	string ret;
+	if(e.m_wfm)
 	{
-		double age = chrono::duration<double>(chrono::system_clock::now() - e.m_updated).count();
-		char buf[32];
-		snprintf(buf, sizeof(buf), "%.3f", age);
-		ret += string(",\"updated\":\"") + FormatTimestamp(e.m_updated) + "\",\"age_s\":" + buf;
+		//Waveforms are only listed here, the samples are served by /waveforms/<key>
+		ret = "{\"type\":\"waveform\"";
+		for(auto& field : WaveformMetadata(*e.m_wfm))
+			ret += ",\"" + field.first + "\":" + field.second;
 	}
+	else
+	{
+		//JSON has no representation for NaN or infinity
+		string value = "null";
+		if(!e.m_text.empty() && isfinite(e.m_value))
+			value = e.m_text;
+
+		ret = string("{");
+		if(e.m_seq != 0)
+			ret += "\"type\":\"scalar\",";
+		ret += string("\"value\":") + value + ",\"unit\":\"" + JsonEscape(e.m_unit) + "\"";
+	}
+
+	ret += ",\"seq\":" + to_string(e.m_seq);
+	if(e.m_seq != 0)
+		ret += string(",\"updated\":\"") + FormatTimestamp(e.m_updated) + "\",\"age_s\":" + FormatAge(e.m_updated);
 	return ret + "}";
+}
+
+/**
+	@brief Gets the latest waveform for a key and flags it as wanted, so the next acquisition is copied
+
+	@param key			Key to look up
+	@param freshTimeout	If positive, wait up to this many seconds for the next update instead of returning the
+						current copy
+	@param wfm			Set to the waveform
+	@param seq			Set to the update count of the waveform
+	@param updated		Set to the time the waveform was published
+
+	@return HTTP status: 200, 404 if the key doesn't exist or has no waveform (yet), 504 if no fresh waveform arrived in time
+ */
+int HTTPExportServer::GetWaveform(
+	const string& key,
+	double freshTimeout,
+	shared_ptr<const HTTPExportWaveform>& wfm,
+	uint64_t& seq,
+	chrono::system_clock::time_point& updated)
+{
+	unique_lock<mutex> lock(m_entriesMutex);
+	auto it = m_entries.find(key);
+	if(it == m_entries.end())
+		return httplib::StatusCode::NotFound_404;
+
+	//Only waveforms (or entries without a value yet, which may become one) can be requested
+	if(!it->second.m_wfm && (it->second.m_seq != 0))
+		return httplib::StatusCode::NotFound_404;
+
+	it->second.m_wfmWanted = true;
+
+	if(freshTimeout > 0)
+	{
+		auto seq0 = it->second.m_seq;
+		bool updatedInTime = m_entriesChanged.wait_for(
+			lock,
+			chrono::duration<double>(freshTimeout),
+			[&]
+			{
+				//The entry may have been removed while we waited
+				it = m_entries.find(key);
+				return m_stopping || (it == m_entries.end()) || (it->second.m_seq != seq0);
+			});
+
+		if(it == m_entries.end())
+			return httplib::StatusCode::NotFound_404;
+		if(!updatedInTime || m_stopping)
+			return httplib::StatusCode::GatewayTimeout_504;
+	}
+
+	if(!it->second.m_wfm)
+		return httplib::StatusCode::NotFound_404;
+
+	wfm = it->second.m_wfm;
+	seq = it->second.m_seq;
+	updated = it->second.m_updated;
+	return httplib::StatusCode::OK_200;
+}
+
+/**
+	@brief Serves /waveforms/<key>[.json|.csv|.npy]
+
+	Query parameters: fresh=1 waits for the next acquisition (timeout=<seconds>, default 10, at most 60).
+ */
+void HTTPExportServer::HandleWaveformRequest(const httplib::Request& req, httplib::Response& res, const string& format)
+{
+	double freshTimeout = 0;
+	if(req.has_param("fresh") && (req.get_param_value("fresh") != "0"))
+	{
+		freshTimeout = g_defaultFreshTimeout;
+		if(req.has_param("timeout"))
+			freshTimeout = min(atof(req.get_param_value("timeout").c_str()), g_maxFreshTimeout);
+	}
+
+	shared_ptr<const HTTPExportWaveform> wfm;
+	uint64_t seq = 0;
+	chrono::system_clock::time_point updated;
+	int status = GetWaveform(req.matches[1], freshTimeout, wfm, seq, updated);
+	if(status != httplib::StatusCode::OK_200)
+	{
+		res.status = status;
+		if(status == httplib::StatusCode::GatewayTimeout_504)
+			res.set_content("No new waveform before the timeout (is the scope triggering?)\n", "text/plain");
+		else
+			res.set_content("No such waveform, or none acquired yet\n", "text/plain");
+		return;
+	}
+
+	//From here on we only use our own snapshot, without holding any lock
+
+	if( (format != "npy") && (wfm->m_samples.size() > g_maxTextSamples) )
+	{
+		res.status = httplib::StatusCode::PayloadTooLarge_413;
+		res.set_content(
+			"Waveform has " + to_string(wfm->m_samples.size()) + " samples, more than " +
+				to_string(g_maxTextSamples) + " can be served as JSON or CSV. Use .npy instead.\n",
+			"text/plain");
+		return;
+	}
+
+	if(format == "json")
+	{
+		res.set_content(
+			"{\"type\":\"waveform\",\"seq\":" + to_string(seq) + ",\"updated\":\"" + FormatTimestamp(updated) +
+				"\",\"age_s\":" + FormatAge(updated) + "," + WaveformToJson(*wfm) + "}\n",
+			"application/json");
+		return;
+	}
+
+	//CSV and NumPy carry the metadata in headers
+	res.set_header("X-Seq", to_string(seq));
+	res.set_header("X-Updated", FormatTimestamp(updated));
+	res.set_header("X-Age-S", FormatAge(updated));
+	for(auto& field : WaveformMetadata(*wfm))
+	{
+		//x_unit -> X-X-Unit
+		string name = "X";
+		bool upper = true;
+		for(auto c : "-" + field.first)
+		{
+			if( (c == '_') || (c == '-') )
+			{
+				name += '-';
+				upper = true;
+			}
+			else
+			{
+				name += upper ? static_cast<char>(toupper(c)) : c;
+				upper = false;
+			}
+		}
+
+		//String values without the JSON quotes (units never contain quotes or backslashes that need escaping)
+		auto value = field.second;
+		if( (value.size() >= 2) && (value[0] == '"') )
+			value = value.substr(1, value.size() - 2);
+		res.set_header(name, value);
+	}
+
+	if(format == "csv")
+	{
+		res.set_content(WaveformToCsv(*wfm), "text/csv");
+		return;
+	}
+
+	//NumPy: stream the header and then the data straight from our snapshot.
+	//Uniform waveforms are a float32 array, sparse ones a structured array of (offset, duration, value) records.
+	//Both assume a little endian host, as the header says.
+	auto header = make_shared<string>(NpyHeader(*wfm));
+	auto body = make_shared<string>();
+	const char* data = reinterpret_cast<const char*>(wfm->m_samples.data());
+	size_t datalen = wfm->m_samples.size() * sizeof(float);
+	if(wfm->m_sparse)
+	{
+		const size_t recsize = 2*sizeof(int64_t) + sizeof(float);
+		body->resize(wfm->m_samples.size() * recsize);
+		for(size_t i=0; i<wfm->m_samples.size(); i++)
+		{
+			char* p = &(*body)[i * recsize];
+			memcpy(p, &wfm->m_offsets[i], sizeof(int64_t));
+			memcpy(p + sizeof(int64_t), &wfm->m_durations[i], sizeof(int64_t));
+			memcpy(p + 2*sizeof(int64_t), &wfm->m_samples[i], sizeof(float));
+		}
+		data = body->data();
+		datalen = body->size();
+	}
+
+	res.set_content_provider(
+		header->size() + datalen,
+		"application/octet-stream",
+		[wfm, header, body, data](size_t offset, size_t length, httplib::DataSink& sink)
+		{
+			//Captures keep the snapshot alive until the transfer is done
+			if(offset < header->size())
+			{
+				size_t n = min(length, header->size() - offset);
+				return sink.write(header->data() + offset, n);
+			}
+			return sink.write(data + (offset - header->size()), length);
+		});
+	res.set_header("Content-Disposition", string("attachment; filename=\"") + string(req.matches[1]) + ".npy\"");
 }
 
 /**
@@ -350,16 +620,14 @@ string HTTPExportServer::ValuesToPrometheus()
 	for(auto& it : m_entries)
 	{
 		auto& e = it.second;
-		if(e.m_seq == 0)
+		if( (e.m_seq == 0) || e.m_wfm)
 			continue;
 
 		//Prometheus label values use the same escaping as JSON strings, near enough
 		values += string("ngscopeclient_value{name=\"") + it.first + "\",unit=\"" + JsonEscape(e.m_unit) + "\"} " +
 			e.m_text + "\n";
 
-		char buf[32];
-		snprintf(buf, sizeof(buf), "%.3f", chrono::duration<double>(now - e.m_updated).count());
-		ages += string("ngscopeclient_value_age_seconds{name=\"") + it.first + "\"} " + buf + "\n";
+		ages += string("ngscopeclient_value_age_seconds{name=\"") + it.first + "\"} " + FormatAge(e.m_updated, now) + "\n";
 	}
 	return values + ages;
 }
@@ -381,6 +649,86 @@ static string SanitizeKey(const string& name)
 			ret += '_';
 	}
 	return ret;
+}
+
+/**
+	@brief Gets the name of a unit in ASCII (some of ours use Greek letters or superscripts), for all HTTP output
+ */
+static string AsciiUnitName(Unit unit)
+{
+	string name = unit.ToString();
+	name = str_replace("μ", "u", name);
+	name = str_replace("Ω", "Ohm", name);
+	name = str_replace("°", "deg", name);
+	name = str_replace("ρ", "rho", name);
+	name = str_replace("²", "^2", name);
+
+	//Anything we didn't anticipate
+	for(auto& c : name)
+	{
+		if(static_cast<unsigned char>(c) >= 0x80)
+			c = '?';
+	}
+	return name;
+}
+
+/**
+	@brief Gets the unit values are published in, and the factor converting values in our internal unit to it
+
+	Clients shouldn't need to know our internal units, so values are published in SI units where we use a scaled one
+	(fs, uHz etc.) and percentages as such (we store them as fractions). Unit names are ASCII only.
+ */
+static void GetExportUnit(Unit unit, string& name, double& scale)
+{
+	scale = 1;
+	switch(unit.GetType())
+	{
+		case Unit::UNIT_FS:
+			name = "s";
+			scale = 1e-15;
+			break;
+
+		case Unit::UNIT_PM:
+			name = "m";
+			scale = 1e-12;
+			break;
+
+		case Unit::UNIT_MICROHZ:
+			name = "Hz";
+			scale = 1e-6;
+			break;
+
+		case Unit::UNIT_MILLIVOLTS:
+			name = "V";
+			scale = 1e-3;
+			break;
+
+		case Unit::UNIT_MICROVOLTS:
+			name = "V";
+			scale = 1e-6;
+			break;
+
+		case Unit::UNIT_MICROAMPS:
+			name = "A";
+			scale = 1e-6;
+			break;
+
+		case Unit::UNIT_PERCENT:
+			name = "%";
+			scale = 100;
+			break;
+
+		//These names describe how to display a dimensionless value, not a unit
+		case Unit::UNIT_COUNTS:
+		case Unit::UNIT_COUNTS_SCI:
+		case Unit::UNIT_RATIO_SCI:
+			name = "";
+			break;
+
+		default:
+			name = AsciiUnitName(unit);
+			break;
+	}
 }
 
 static string JsonEscape(const string& s)
@@ -427,6 +775,146 @@ static string FormatTimestamp(chrono::system_clock::time_point t)
 	return buf2;
 }
 
+/**
+	@brief Formats the time since t in seconds with millisecond resolution
+ */
+static string FormatAge(chrono::system_clock::time_point t, chrono::system_clock::time_point now)
+{
+	char buf[32];
+	snprintf(buf, sizeof(buf), "%.3f", chrono::duration<double>(now - t).count());
+	return buf;
+}
+
+/**
+	@brief Formats a sample for JSON or CSV. Floats need 9 significant digits to round-trip.
+ */
+static void AppendSample(string& out, float v, const char* nonFinite)
+{
+	if(!isfinite(v))
+	{
+		out += nonFinite;
+		return;
+	}
+
+	char buf[32];
+	snprintf(buf, sizeof(buf), "%.9g", v);
+	out += buf;
+}
+
+/**
+	@brief Gets the metadata of a waveform as (name, JSON value) pairs, in the order they're output
+ */
+static vector<pair<string, string>> WaveformMetadata(const HTTPExportWaveform& wfm)
+{
+	char scale[32];
+	snprintf(scale, sizeof(scale), "%.15g", wfm.m_xScale);
+
+	return
+	{
+		{"sparse", wfm.m_sparse ? "true" : "false"},
+		{"length", to_string(wfm.m_samples.size())},
+		{"y_unit", "\"" + JsonEscape(wfm.m_yUnit) + "\""},
+		{"x_unit", "\"" + JsonEscape(wfm.m_xUnit) + "\""},
+		{"timescale", to_string(wfm.m_timescale)},
+		{"trigger_phase", to_string(wfm.m_triggerPhase)},
+		{"x_scale", scale},
+		{"x_scaled_unit", "\"" + JsonEscape(wfm.m_xUnitScaled) + "\""},
+		{"start_timestamp", to_string(static_cast<int64_t>(wfm.m_startTimestamp))},
+		{"start_femtoseconds", to_string(wfm.m_startFemtoseconds)}
+	};
+}
+
+/**
+	@brief Formats the metadata and samples of a waveform as JSON object members (without the braces)
+
+	Offsets and durations are raw, in timescale units, so no precision is lost:
+	X of sample i = (offset[i] (or i if uniform) * timescale + trigger_phase) * x_scale, in x_scaled_unit.
+ */
+static string WaveformToJson(const HTTPExportWaveform& wfm)
+{
+	string ret;
+	for(auto& field : WaveformMetadata(wfm))
+		ret += "\"" + field.first + "\":" + field.second + ",";
+
+	ret.reserve(ret.size() + wfm.m_samples.size() * (wfm.m_sparse ? 40 : 14));
+
+	ret += "\"samples\":[";
+	for(size_t i=0; i<wfm.m_samples.size(); i++)
+	{
+		if(i)
+			ret += ',';
+		AppendSample(ret, wfm.m_samples[i], "null");
+	}
+	ret += "]";
+
+	if(wfm.m_sparse)
+	{
+		ret += ",\"offsets\":[";
+		for(size_t i=0; i<wfm.m_offsets.size(); i++)
+		{
+			if(i)
+				ret += ',';
+			ret += to_string(wfm.m_offsets[i]);
+		}
+		ret += "],\"durations\":[";
+		for(size_t i=0; i<wfm.m_durations.size(); i++)
+		{
+			if(i)
+				ret += ',';
+			ret += to_string(wfm.m_durations[i]);
+		}
+		ret += "]";
+	}
+	return ret;
+}
+
+/**
+	@brief Formats a waveform as CSV, like CSVExportFilter: X in seconds (or Hz) and the value
+ */
+static string WaveformToCsv(const HTTPExportWaveform& wfm)
+{
+	string ret;
+	if(wfm.m_xUnitScaled == "s")
+		ret = "Time (s)";
+	else if(wfm.m_xUnitScaled == "Hz")
+		ret = "Frequency (Hz)";
+	else
+		ret = "X (" + wfm.m_xUnitScaled + ")";
+	ret += ",Value (" + wfm.m_yUnit + ")\n";
+
+	ret.reserve(ret.size() + wfm.m_samples.size() * 32);
+	for(size_t i=0; i<wfm.m_samples.size(); i++)
+	{
+		char buf[32];
+		snprintf(buf, sizeof(buf), "%.15g,", wfm.GetX(i) * wfm.m_xScale);
+		ret += buf;
+		AppendSample(ret, wfm.m_samples[i], "NaN");
+		ret += '\n';
+	}
+	return ret;
+}
+
+/**
+	@brief Builds a NumPy .npy (format version 1.0) header for a waveform
+ */
+static string NpyHeader(const HTTPExportWaveform& wfm)
+{
+	string dict = string("{'descr': ") +
+		(wfm.m_sparse ? "[('offset', '<i8'), ('duration', '<i8'), ('value', '<f4')]" : "'<f4'") +
+		", 'fortran_order': False, 'shape': (" + to_string(wfm.m_samples.size()) + ",), }";
+
+	//Magic, version and length take 10 bytes; the whole header is padded with spaces to a multiple of 64,
+	//ending in a newline
+	size_t total = (10 + dict.size() + 1 + 63) / 64 * 64;
+	dict.append(total - 10 - dict.size() - 1, ' ');
+	dict += '\n';
+
+	string ret("\x93NUMPY\x01\x00", 8);
+	ret += static_cast<char>(dict.size() & 0xff);
+	ret += static_cast<char>(dict.size() >> 8);
+	return ret + dict;
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // HTTPExportFilter construction / destruction
 
@@ -442,7 +930,8 @@ HTTPExportFilter::HTTPExportFilter(const string& color)
 		initializer_list<Stream::StreamType>
 		{
 			Stream::STREAM_TYPE_ANALOG_SCALAR,
-			Stream::STREAM_TYPE_DIGITAL_SCALAR
+			Stream::STREAM_TYPE_DIGITAL_SCALAR,
+			Stream::STREAM_TYPE_ANALOG
 		});
 
 	//Like ExportFilter, keep a reference to ourself since nothing downstream will.
@@ -505,6 +994,9 @@ string HTTPExportFilter::GetEndpointURL()
 	if(base.empty())
 		return string("(") + server.GetError() + ")";
 
+	auto din = GetInput(0);
+	if(din && (din.GetType() == Stream::STREAM_TYPE_ANALOG))
+		return base + "/waveforms/" + m_key;
 	return base + "/values/" + m_key;
 }
 
@@ -563,17 +1055,30 @@ void HTTPExportFilter::Refresh(
 		return;
 	}
 
+	auto& server = HTTPExportServer::Get();
+
+	if(din.GetType() == Stream::STREAM_TYPE_ANALOG)
+	{
+		PublishWaveform(din);
+		return;
+	}
+
+	string unit;
+	double scale;
+	GetExportUnit(din.GetYAxisUnits(), unit, scale);
+
 	double value;
 	char text[32];
 	if(din.GetType() == Stream::STREAM_TYPE_DIGITAL_SCALAR)
 	{
+		//Integers are published as-is
 		auto v = din.GetDigitalScalarValue();
 		value = v;
 		snprintf(text, sizeof(text), "%" PRIu64, v);
 	}
 	else
 	{
-		value = din.GetScalarValue();
+		value = din.GetScalarValue() * scale;
 
 		//Scalars are doubles; 15 significant digits is the most that round-trips any decimal value.
 		//Spell non-finite values the way Prometheus expects.
@@ -585,10 +1090,78 @@ void HTTPExportFilter::Refresh(
 			snprintf(text, sizeof(text), "%.15g", value);
 	}
 
-	auto& server = HTTPExportServer::Get();
-	server.Update(m_key, value, text, din.GetYAxisUnits().ToString());
+	server.Update(m_key, value, text, unit);
 
 	auto err = server.GetError();
 	if(!err.empty())
 		AddErrorMessage("Server not running", err);
+}
+
+/**
+	@brief Copies the input waveform to the server, if a client asked for it since the last copy
+
+	The server thread must never see the live waveform (the filter graph reuses buffers), so we give it a snapshot.
+	Must be called with m_keyMutex held.
+ */
+void HTTPExportFilter::PublishWaveform(StreamDescriptor& din)
+{
+	auto& server = HTTPExportServer::Get();
+
+	auto err = server.GetError();
+	if(!err.empty())
+		AddErrorMessage("Server not running", err);
+
+	auto data = din.GetData();
+	if(!data)
+	{
+		AddErrorMessage("No data", "The input has no waveform");
+		return;
+	}
+
+	auto sa = dynamic_cast<SparseAnalogWaveform*>(data);
+	auto ua = dynamic_cast<UniformAnalogWaveform*>(data);
+	if(!sa && !ua)
+	{
+		AddErrorMessage("Unsupported waveform", "The input waveform is neither uniform nor sparse analog");
+		return;
+	}
+
+	if(!server.IsWaveformWanted(m_key))
+		return;
+
+	data->PrepareForCpuAccess();
+
+	auto wfm = make_shared<HTTPExportWaveform>();
+	wfm->m_timescale = data->m_timescale;
+	wfm->m_triggerPhase = data->m_triggerPhase;
+	wfm->m_startTimestamp = data->m_startTimestamp;
+	wfm->m_startFemtoseconds = data->m_startFemtoseconds;
+
+	//Offsets stay in our internal X unit (integers, no precision lost), clients apply m_xScale
+	auto xunit = din.GetXAxisUnits();
+	wfm->m_xUnit = AsciiUnitName(xunit);
+	GetExportUnit(xunit, wfm->m_xUnitScaled, wfm->m_xScale);
+
+	//Samples are converted like scalars
+	double yscale;
+	GetExportUnit(din.GetYAxisUnits(), wfm->m_yUnit, yscale);
+
+	size_t len = data->size();
+	if(sa)
+	{
+		wfm->m_sparse = true;
+		wfm->m_samples.assign(sa->m_samples.GetCpuPointer(), sa->m_samples.GetCpuPointer() + len);
+		wfm->m_offsets.assign(sa->m_offsets.GetCpuPointer(), sa->m_offsets.GetCpuPointer() + len);
+		wfm->m_durations.assign(sa->m_durations.GetCpuPointer(), sa->m_durations.GetCpuPointer() + len);
+	}
+	else
+		wfm->m_samples.assign(ua->m_samples.GetCpuPointer(), ua->m_samples.GetCpuPointer() + len);
+
+	if(yscale != 1)
+	{
+		for(auto& v : wfm->m_samples)
+			v *= yscale;
+	}
+
+	server.UpdateWaveform(m_key, wfm);
 }
