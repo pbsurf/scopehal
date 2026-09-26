@@ -1,6 +1,6 @@
 /***********************************************************************************************************************
 *                                                                                                                      *
-* libscopehal                                                                                                          *
+* libscopeprotocols                                                                                                    *
 *                                                                                                                      *
 * Copyright (c) 2012-2026 Andrew D. Zonenberg and contributors                                                         *
 * All rights reserved.                                                                                                 *
@@ -27,57 +27,77 @@
 *                                                                                                                      *
 ***********************************************************************************************************************/
 
-#include "../scopehal/scopehal.h"
-#include "../scopehal/AlignedAllocator.h"
-#include "PeakDetectionFilter.h"
+/**
+	@file
+	@author ngscopeclient contributors
+	@brief Declaration of PeakSelectFilter
+ */
+#ifndef PeakSelectFilter_h
+#define PeakSelectFilter_h
 
-using namespace std;
-
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-// PeakDetector
-
-PeakDetector::PeakDetector()
-	: m_peakFirComputePipeline("shaders/FIRFilter.spv", 3, sizeof(FIRFilterArgs))
-{
-}
-
-PeakDetector::~PeakDetector()
-{
-}
-
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-// Construction / destruction
-
-PeakDetectionFilter::PeakDetectionFilter(const string& color, Category cat)
-	: Filter(color, cat, Unit(Unit::UNIT_HZ))
-	, m_numpeaks(m_parameters["Number of Peaks"])
-	, m_peakwindow(m_parameters["Peak Window"])
-{
-	m_numpeaks = FilterParameter(FilterParameter::TYPE_INT, Unit(Unit::UNIT_COUNTS));
-	m_numpeaks.SetIntVal(0);	//Temporary default to off because peak detection is sloooow
-
-	m_peakwindow = FilterParameter(FilterParameter::TYPE_FLOAT, Unit(Unit::UNIT_HZ));
-	m_peakwindow.SetFloatVal(500000); //500 kHz between peaks
-}
-
-PeakDetectionFilter::~PeakDetectionFilter()
-{
-
-}
+#include "../scopehal/PeakDetectionFilter.h"
 
 /**
-	@brief Checks if any filter connected to one of our outputs reads our peak list
+	@brief Match if the input is the first output of a PeakDetector (FFT, Peaks, spectrum analyzer channel, etc.)
  */
-bool PeakDetectionFilter::HasPeakConsumer()
+class InputConstraintPeakDetector : public InputConstraint
 {
-	for(auto& sinks : m_sinks)
+public:
+	InputConstraintPeakDetector(FlowGraphNode* sink)
+		: InputConstraint(sink)
+	{}
+
+	virtual bool Check(StreamDescriptor source) override
 	{
-		for(auto node : sinks)
-		{
-			auto f = dynamic_cast<Filter*>(node);
-			if(f && f->ConsumesUpstreamPeaks())
-				return true;
-		}
+		return (source.m_stream == 0) &&
+			(source.GetType() == Stream::STREAM_TYPE_ANALOG) &&
+			(dynamic_cast<PeakDetector*>(source.m_channel) != nullptr);
 	}
-	return false;
-}
+
+	virtual std::string ToString() override
+	{ return "Output of a peak detector (FFT, Peaks, Peak Hold, ...)"; }
+};
+
+/**
+	@brief Selects one peak found by an upstream PeakDetector and outputs its position, magnitude and FWHM as scalars
+ */
+class PeakSelectFilter : public Filter
+{
+public:
+	PeakSelectFilter(const std::string& color);
+
+	virtual void Refresh(vk::raii::CommandBuffer& cmdBuf, std::shared_ptr<QueueHandle> queue) override;
+
+	virtual bool ConsumesUpstreamPeaks() override
+	{ return true; }
+
+	static std::string GetProtocolName();
+
+	PROTOCOL_DECODER_INITPROC(PeakSelectFilter)
+
+protected:
+	void OnModeChanged();
+	void OutputNoPeak();
+
+	///@brief How the peak is chosen
+	FilterParameter& m_mode;
+
+	///@brief 1-based rank of the peak by magnitude (MODE_RANK)
+	FilterParameter& m_rank;
+
+	///@brief Target X position (MODE_HIGHEST_IN_RANGE, MODE_NEAREST)
+	FilterParameter& m_target;
+
+	///@brief Maximum distance from m_target, 0 for unlimited (MODE_HIGHEST_IN_RANGE, MODE_NEAREST)
+	FilterParameter& m_range;
+
+	///@brief Values for m_mode
+	enum Mode
+	{
+		MODE_RANK,
+		MODE_HIGHEST_IN_RANGE,
+		MODE_NEAREST
+	};
+};
+
+#endif

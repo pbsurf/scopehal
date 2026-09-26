@@ -259,6 +259,15 @@ public:
 
 	virtual bool ShouldPersistWaveform() override;
 
+	/**
+		@brief Returns true if this filter reads the peak list of its upstream PeakDetector
+
+		A PeakDetectionFilter runs its peak search when at least one of its sinks returns true here,
+		even if it isn't displaying any peaks itself.
+	 */
+	virtual bool ConsumesUpstreamPeaks()
+	{ return false; }
+
 protected:
 
 	///@brief Category this filter should be displayed under

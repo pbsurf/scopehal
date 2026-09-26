@@ -212,14 +212,38 @@ public:
 	PeakDetectionFilter(const std::string& color, Category cat);
 	virtual ~PeakDetectionFilter();
 
+	///@brief Number of peaks to draw (the first ones of GetPeaks(), which may hold more for downstream filters)
+	size_t GetDisplayedPeakCount()
+	{ return std::min(static_cast<size_t>(std::max(m_numpeaks.GetIntVal(), (int64_t)0)), m_peaks.size()); }
+
+	///@brief Maximum number of peaks kept when a downstream filter consumes the peak list
+	static constexpr int64_t MAX_STORED_PEAKS = 1000;
+
 protected:
+
+	bool HasPeakConsumer();
+
+	/**
+		@brief Checks if the peak search should run: peaks are displayed, or a downstream filter reads them
+
+		Derived classes that skip FindPeaks() (and the GPU sync it needs) when it isn't wanted must test this,
+		not just the Number of Peaks parameter.
+	 */
+	bool IsPeakSearchNeeded()
+	{ return (m_numpeaks.GetIntVal() > 0) || HasPeakConsumer(); }
 
 	template<class T>
 	void FindPeaks(T* cap, vk::raii::CommandBuffer& cmdBuf, std::shared_ptr<QueueHandle> queue)
 	{
+		//Only search if we display peaks or a downstream filter reads them (the search is slow).
+		//If a downstream filter reads them, keep every peak found (up to a cap) so it isn't limited to the displayed ones.
+		int64_t maxPeaks = std::max(m_numpeaks.GetIntVal(), (int64_t)0);
+		if(HasPeakConsumer())
+			maxPeaks = std::max(maxPeaks, MAX_STORED_PEAKS);
+
 		PeakDetector::FindPeaks(
 			cap,
-			m_numpeaks.GetIntVal(),
+			maxPeaks,
 			GetPeakWindow(),
 			GetYAxisUnits(0).IsLogarithmic(),
 			cmdBuf,

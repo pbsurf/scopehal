@@ -295,7 +295,7 @@ void ComplexFFTFilter::Refresh(vk::raii::CommandBuffer& cmdBuf, shared_ptr<Queue
 	cap->MarkModifiedFromGpu();
 
 	//If doing peak detection, block now
-	if(m_numpeaks.GetIntVal() > 0)
+	if(IsPeakSearchNeeded())
 	{
 		cmdBuf.end();
 		queue->SubmitAndBlock(cmdBuf);

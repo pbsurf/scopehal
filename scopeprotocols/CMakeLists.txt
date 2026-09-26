@@ -139,6 +139,7 @@ set(SCOPEPROTOCOLS_SOURCES
 	PCIeTransportDecoder.cpp
 	PeakHoldFilter.cpp
 	PeaksFilter.cpp
+	PeakSelectFilter.cpp
 	PeriodMeasurement.cpp
 	PhaseMeasurement.cpp
 	PhaseNonlinearityFilter.cpp

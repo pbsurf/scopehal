@@ -178,6 +178,7 @@
 #include "PCIeTransportDecoder.h"
 #include "PeakHoldFilter.h"
 #include "PeaksFilter.h"
+#include "PeakSelectFilter.h"
 #include "PeriodMeasurement.h"
 #include "PhaseMeasurement.h"
 #include "PhaseNonlinearityFilter.h"

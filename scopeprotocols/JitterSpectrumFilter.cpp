@@ -242,7 +242,7 @@ void JitterSpectrumFilter::Refresh(vk::raii::CommandBuffer& cmdBuf, shared_ptr<Q
 	DoRefresh(din, *extended_samples, ui_width_final, num_uis, nouts, false, cmdBuf, queue);
 
 	//force a submit if not doing peak detection
-	if(m_numpeaks.GetIntVal() == 0)
+	if(!IsPeakSearchNeeded())
 	{
 		//Mark the scratch buffer as in use until the command buffer finishes
 		queue->MarkScratchBufferUsed(extended_samples);
