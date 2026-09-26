@@ -106,7 +106,11 @@ FilterGraphExecutor::FilterGraphExecutor(size_t numThreads)
 FilterGraphExecutor::~FilterGraphExecutor()
 {
 	//Terminate worker threads
-	m_terminating = true;
+	//(set the flag under m_mutex so a worker can't miss the wakeup between checking it and waiting)
+	{
+		lock_guard<mutex> lock(m_mutex);
+		m_terminating = true;
+	}
 	m_workerCvar.notify_all();
 	for(auto& t : m_threads)
 		t->join();
@@ -155,14 +159,13 @@ void FilterGraphExecutor::RunBlocking(const set<FlowGraphNode*>& nodes)
 	{
 		lock_guard<mutex> lock(m_mutex);
 
-		if(!m_allWorkersComplete)
-			LogWarning("Entering RunBlocking() but not all workers are complete from previous run\n");
+		if(!m_incompleteNodes.empty())
+			LogWarning("Entering RunBlocking() but not all nodes are complete from previous run\n");
 
 		m_incompleteNodes = nodes;
 		m_incompleteNodes.erase(nullptr);	//don't crash if a null filter somehow ended up in the list
 
 		m_runnableNodes.clear();
-		m_allWorkersComplete = false;
 
 		Filter::ClearAnalysisCache();
 	}
@@ -170,15 +173,12 @@ void FilterGraphExecutor::RunBlocking(const set<FlowGraphNode*>& nodes)
 	//Wake up our workers
 	m_workerCvar.notify_all();
 
-	//Block until they're finished
-	while(true)
+	//Block until they're finished.
+	//A node leaves m_incompleteNodes only once it has run (and m_runningNodes at the same time), so an empty set
+	//means every node of this run is done and no worker is still running one of them.
 	{
-		unique_lock<mutex> lock(m_completionCvarMutex);
-		m_completionCvar.wait(lock, [this]{return m_allWorkersComplete;});
-
-		lock_guard<mutex> lock2(m_mutex);
-		if(m_runnableNodes.empty())
-			break;
+		unique_lock<mutex> lock(m_mutex);
+		m_completionCvar.wait(lock, [this]{return m_incompleteNodes.empty();});
 	}
 
 	//Update global performance stats
@@ -285,7 +285,9 @@ void FilterGraphExecutor::FindConcurrentNodes(
 	LogTrace("Found %zu nodes\n", workingSet.size());
 }
 /**
-	@brief Returns the next batch of filters to run
+	@brief Returns the next batch of filters to run, blocking until there is one
+
+	@return The batch, or an empty batch if the executor is shutting down
  */
 SubmitBatch FilterGraphExecutor::GetNextBatch()
 {
@@ -294,16 +296,17 @@ SubmitBatch FilterGraphExecutor::GetNextBatch()
 
 	SubmitBatch batch;
 
+	//All state checked here is only changed under m_mutex, and the wait releases it atomically,
+	//so a notify between checking and waiting can't be lost
+	unique_lock<mutex> lock(m_mutex);
 	while(true)
 	{
+		if(m_terminating)
+			break;
+
 		//Check for stuff
+		if(!m_incompleteNodes.empty())
 		{
-			lock_guard<mutex> lock(m_mutex);
-
-			//Nothing left to run? Stop
-			if(m_incompleteNodes.empty())
-				break;
-
 			//Nothing ready to run? Update the run queue
 			if(m_runnableNodes.empty())
 				UpdateRunnable();
@@ -335,8 +338,7 @@ SubmitBatch FilterGraphExecutor::GetNextBatch()
 			}
 		}
 
-		//Still nothing to run? Block
-		unique_lock<mutex> lock(m_workerCvarMutex);
+		//Still nothing to run? Block until a node completes, a new run starts, or we shut down
 		m_workerCvar.wait(lock);
 	}
 
@@ -603,75 +605,45 @@ void FilterGraphExecutor::DoExecutorThread(size_t i)
 	//Main loop
 	while(true)
 	{
-		{
-			//Wait until the main thread starts a new round of execution, or the timeout elapses
-			//When we time out, check if we're shutting down
-			unique_lock<mutex> lock(m_workerCvarMutex);
-			m_workerCvar.wait_for(lock, chrono::milliseconds(50));
-		}
-
-		//If they woke us up because the context is being destroyed, we're done
-		if(m_terminating)
+		//Wait for the next batch of work, and stop if the context is being destroyed
+		SubmitBatch batch = GetNextBatch();
+		if(batch.empty())
 			break;
 
-		//If we're already done, nothing to do
-		if(m_allWorkersComplete)
-			continue;
+		//Get the list of filters in the batch
+		auto filters = batch.GetNodes();
+		LogTrace("Runner %zu: got batch of %zu nodes\n", i, filters.size());
 
-		//Get the next batch of work
-		while(true)
+		//Run the batch
+		double start = GetTime();
+		batch.Run(cmdbuf, queue);
+		double dt = GetTime() - start;
+		int64_t fs = dt * FS_PER_SECOND;
+
+		//Update performance stats
 		{
-			//Pull the next batch from the scheduler and stop if it has no more work for us
-			SubmitBatch batch = GetNextBatch();
-			if(batch.empty())
-				break;
-
-			//Get the list of filters in the batch
-			auto filters = batch.GetNodes();
-			LogTrace("Runner %zu: got batch of %zu nodes\n", i, filters.size());
-
-			//Run the batch
-			double start = GetTime();
-			batch.Run(cmdbuf, queue);
-			double dt = GetTime() - start;
-			int64_t fs = dt * FS_PER_SECOND;
-
-			//Update performance stats
-			{
-				lock_guard<mutex> slock(m_perfStatsMutex);
-				for(auto f : filters)
-					m_currentExecutionTime[f] = fs;
-			}
-
-			//Filter execution has completed, remove them from the running list and mark as completed
-			{
-				lock_guard<mutex> lock2(m_mutex);
-				for(auto f : filters)
-				{
-					m_runningNodes.erase(f);
-					m_incompleteNodes.erase(f);
-				}
-			}
-
-			//Wake up all threads that might have been waiting on this filter to complete
-			m_workerCvar.notify_all();
+			lock_guard<mutex> slock(m_perfStatsMutex);
+			for(auto f : filters)
+				m_currentExecutionTime[f] = fs;
 		}
 
-		//We have no more filters to run.
-		//If this was the last filter (nothing left incomplete), we're done - wake up the main thread
-		bool empty = false;
+		//Filter execution has completed, remove them from the running list and mark as completed
+		bool runComplete = false;
 		{
-			lock_guard<mutex> lock2(m_mutex);
-			empty = m_incompleteNodes.empty();
-		}
-		if(empty)
-		{
+			lock_guard<mutex> lock(m_mutex);
+			for(auto f : filters)
 			{
-				lock_guard<mutex> lock3(m_completionCvarMutex);
-				m_allWorkersComplete = true;
+				m_runningNodes.erase(f);
+				m_incompleteNodes.erase(f);
 			}
+			runComplete = m_incompleteNodes.empty();
+		}
 
+		//Wake up all threads that might have been waiting on this filter to complete
+		m_workerCvar.notify_all();
+
+		//If this was the last filter, wake up the main thread
+		if(runComplete)
 			m_completionCvar.notify_all();
-		}
 	}
 }
