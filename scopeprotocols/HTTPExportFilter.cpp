@@ -69,6 +69,7 @@ static void GetExportUnit(Unit unit, string& name, double& scale);
 static string JsonEscape(const string& s);
 static string FormatTimestamp(chrono::system_clock::time_point t);
 static string FormatAge(chrono::system_clock::time_point t, chrono::system_clock::time_point now = chrono::system_clock::now());
+static void SetErrorResponse(httplib::Response& res, int status, const char* what);
 static vector<pair<string, string>> WaveformMetadata(const HTTPExportWaveform& wfm);
 static string WaveformToJson(const HTTPExportWaveform& wfm);
 static string WaveformToCsv(const HTTPExportWaveform& wfm);
@@ -78,7 +79,8 @@ static string NpyHeader(const HTTPExportWaveform& wfm);
 // HTTPExportServer
 
 HTTPExportServer::HTTPExportServer()
-	: m_host("127.0.0.1")
+	: m_allowTrigger(true)
+	, m_host("127.0.0.1")
 	, m_port(8080)
 {
 }
@@ -103,9 +105,15 @@ HTTPExportServer& HTTPExportServer::Get()
 
 	Cheap if nothing changed, so it may be called every frame. Also periodically retries starting the listener if a
 	previous attempt failed.
+
+	@param host			Address to listen on
+	@param port			Port to listen on
+	@param allowTrigger	True if clients may request acquisitions (trigger= query parameter)
  */
-void HTTPExportServer::Configure(const string& host, uint16_t port)
+void HTTPExportServer::Configure(const string& host, uint16_t port, bool allowTrigger)
 {
+	m_allowTrigger = allowTrigger;
+
 	lock_guard<mutex> lock(m_serverMutex);
 
 	bool wanted;
@@ -263,6 +271,20 @@ bool HTTPExportServer::IsWaveformWanted(const string& key)
 }
 
 /**
+	@brief Gets and clears the acquisition requested by clients since the last call
+
+	Called by the application every frame. It decides what to do: nothing if the trigger is already running, since
+	the next acquisition will satisfy the clients anyway.
+ */
+HTTPExportServer::TriggerRequest HTTPExportServer::TakeTriggerRequest()
+{
+	lock_guard<mutex> lock(m_entriesMutex);
+	auto ret = m_triggerRequest;
+	m_triggerRequest = TRIGGER_NONE;
+	return ret;
+}
+
+/**
 	@brief Starts the listener. Must be called with m_serverMutex held.
  */
 void HTTPExportServer::Start()
@@ -272,7 +294,7 @@ void HTTPExportServer::Start()
 	auto server = make_unique<httplib::Server>();
 
 	//We only expect occasional polling, no need for a big pool
-	server->new_task_queue = [] { return new httplib::ThreadPool(2, 4); };
+	server->new_task_queue = [] { return new httplib::ThreadPool(2, 16); };
 
 	auto allValues = [this](const httplib::Request&, httplib::Response& res)
 		{ res.set_content(AllValuesToJson(), "application/json"); };
@@ -282,10 +304,19 @@ void HTTPExportServer::Start()
 	server->Get(string("/values/(") + g_keyPattern + ")\\.txt",
 		[this](const httplib::Request& req, httplib::Response& res)
 		{
-			lock_guard<mutex> lock(m_entriesMutex);
+			double freshTimeout;
+			TriggerRequest trigger;
+			if(!ParseFreshParams(req, res, freshTimeout, trigger))
+				return;
+
+			unique_lock<mutex> lock(m_entriesMutex);
+			int status = WaitForUpdate(lock, req.matches[1], freshTimeout, trigger);
 			auto it = m_entries.find(req.matches[1]);
-			if( (it == m_entries.end()) || it->second.m_text.empty() )
-				res.status = httplib::StatusCode::NotFound_404;
+			if( (status == httplib::StatusCode::OK_200) && it->second.m_text.empty() )
+				status = httplib::StatusCode::NotFound_404;
+
+			if(status != httplib::StatusCode::OK_200)
+				SetErrorResponse(res, status, "value");
 			else
 				res.set_content(it->second.m_text + "\n", "text/plain");
 		});
@@ -293,9 +324,26 @@ void HTTPExportServer::Start()
 	server->Get(string("/values/(") + g_keyPattern + ")",
 		[this](const httplib::Request& req, httplib::Response& res)
 		{
-			auto json = ValueToJson(req.matches[1]);
-			if(json.empty())
-				res.status = httplib::StatusCode::NotFound_404;
+			double freshTimeout;
+			TriggerRequest trigger;
+			if(!ParseFreshParams(req, res, freshTimeout, trigger))
+				return;
+
+			int status;
+			{
+				unique_lock<mutex> lock(m_entriesMutex);
+				status = WaitForUpdate(lock, req.matches[1], freshTimeout, trigger);
+			}
+
+			//Might have been removed since we checked
+			string json;
+			if(status == httplib::StatusCode::OK_200)
+				json = ValueToJson(req.matches[1]);
+			if(json.empty() && (status == httplib::StatusCode::OK_200))
+				status = httplib::StatusCode::NotFound_404;
+
+			if(status != httplib::StatusCode::OK_200)
+				SetErrorResponse(res, status, "value");
 			else
 				res.set_content(json + "\n", "application/json");
 		});
@@ -397,11 +445,105 @@ string HTTPExportServer::ValueToJson(const string& key)
 }
 
 /**
+	@brief Parses the fresh, timeout and trigger query parameters
+
+	trigger=force (or 1) / single asks the application for an acquisition if the trigger is stopped, and implies
+	fresh=1. fresh=1 waits for the next update, up to timeout=<seconds> (default 10, at most 60).
+
+	@return False if the parameters are invalid or triggering is disabled; the error response is already set
+ */
+bool HTTPExportServer::ParseFreshParams(
+	const httplib::Request& req, httplib::Response& res, double& freshTimeout, TriggerRequest& trigger)
+{
+	freshTimeout = 0;
+	trigger = TRIGGER_NONE;
+
+	if(req.has_param("trigger"))
+	{
+		auto value = req.get_param_value("trigger");
+		if( (value == "force") || (value == "1") )
+			trigger = TRIGGER_FORCE;
+		else if(value == "single")
+			trigger = TRIGGER_SINGLE;
+		else if(value != "0")
+		{
+			res.status = httplib::StatusCode::BadRequest_400;
+			res.set_content("trigger must be force (or 1), single, or 0\n", "text/plain");
+			return false;
+		}
+
+		if( (trigger != TRIGGER_NONE) && !m_allowTrigger)
+		{
+			res.status = httplib::StatusCode::Forbidden_403;
+			res.set_content(
+				"Triggering acquisitions over HTTP is disabled in ngscopeclient's preferences "
+				"(Network > HTTP Export)\n",
+				"text/plain");
+			return false;
+		}
+	}
+
+	if( (trigger != TRIGGER_NONE) || (req.has_param("fresh") && (req.get_param_value("fresh") != "0")) )
+	{
+		freshTimeout = g_defaultFreshTimeout;
+		if(req.has_param("timeout"))
+			freshTimeout = min(atof(req.get_param_value("timeout").c_str()), g_maxFreshTimeout);
+	}
+	return true;
+}
+
+/**
+	@brief Flags an entry's waveform as wanted and optionally waits for its next update. Must be called with lock held.
+
+	@param lock			Lock on m_entriesMutex
+	@param key			Key to look up
+	@param freshTimeout	If positive, wait up to this many seconds for the next update
+	@param trigger		Acquisition to request from the application while waiting
+
+	@return HTTP status: 200, 404 if the key doesn't exist (or was removed while waiting), 504 on timeout
+ */
+int HTTPExportServer::WaitForUpdate(
+	unique_lock<mutex>& lock, const string& key, double freshTimeout, TriggerRequest trigger)
+{
+	auto it = m_entries.find(key);
+	if(it == m_entries.end())
+		return httplib::StatusCode::NotFound_404;
+
+	//Waveforms are only copied when wanted (harmless for scalars)
+	it->second.m_wfmWanted = true;
+
+	if(freshTimeout <= 0)
+		return httplib::StatusCode::OK_200;
+
+	//Requested under the same lock as we read seq0, so the update it causes can't be missed
+	auto seq0 = it->second.m_seq;
+	if(trigger > m_triggerRequest)
+		m_triggerRequest = trigger;
+
+	bool updatedInTime = m_entriesChanged.wait_for(
+		lock,
+		chrono::duration<double>(freshTimeout),
+		[&]
+		{
+			//The entry may have been removed while we waited
+			it = m_entries.find(key);
+			return m_stopping || (it == m_entries.end()) || (it->second.m_seq != seq0);
+		});
+
+	if(it == m_entries.end())
+		return httplib::StatusCode::NotFound_404;
+	if(!updatedInTime || m_stopping)
+		return httplib::StatusCode::GatewayTimeout_504;
+	return httplib::StatusCode::OK_200;
+}
+
+/**
 	@brief Gets the latest waveform for a key and flags it as wanted, so the next acquisition is copied
 
 	@param key			Key to look up
 	@param freshTimeout	If positive, wait up to this many seconds for the next update instead of returning the
 						current copy
+	@param trigger		Acquisition to request from the application while waiting
 	@param wfm			Set to the waveform
 	@param seq			Set to the update count of the waveform
 	@param updated		Set to the time the waveform was published
@@ -411,6 +553,7 @@ string HTTPExportServer::ValueToJson(const string& key)
 int HTTPExportServer::GetWaveform(
 	const string& key,
 	double freshTimeout,
+	TriggerRequest trigger,
 	shared_ptr<const HTTPExportWaveform>& wfm,
 	uint64_t& seq,
 	chrono::system_clock::time_point& updated)
@@ -424,27 +567,12 @@ int HTTPExportServer::GetWaveform(
 	if(!it->second.m_wfm && (it->second.m_seq != 0))
 		return httplib::StatusCode::NotFound_404;
 
-	it->second.m_wfmWanted = true;
+	int status = WaitForUpdate(lock, key, freshTimeout, trigger);
+	if(status != httplib::StatusCode::OK_200)
+		return status;
 
-	if(freshTimeout > 0)
-	{
-		auto seq0 = it->second.m_seq;
-		bool updatedInTime = m_entriesChanged.wait_for(
-			lock,
-			chrono::duration<double>(freshTimeout),
-			[&]
-			{
-				//The entry may have been removed while we waited
-				it = m_entries.find(key);
-				return m_stopping || (it == m_entries.end()) || (it->second.m_seq != seq0);
-			});
-
-		if(it == m_entries.end())
-			return httplib::StatusCode::NotFound_404;
-		if(!updatedInTime || m_stopping)
-			return httplib::StatusCode::GatewayTimeout_504;
-	}
-
+	//WaitForUpdate() checked it still exists, and we've held the lock since
+	it = m_entries.find(key);
 	if(!it->second.m_wfm)
 		return httplib::StatusCode::NotFound_404;
 
@@ -457,29 +585,22 @@ int HTTPExportServer::GetWaveform(
 /**
 	@brief Serves /waveforms/<key>[.json|.csv|.npy]
 
-	Query parameters: fresh=1 waits for the next acquisition (timeout=<seconds>, default 10, at most 60).
+	Query parameters: see ParseFreshParams().
  */
 void HTTPExportServer::HandleWaveformRequest(const httplib::Request& req, httplib::Response& res, const string& format)
 {
-	double freshTimeout = 0;
-	if(req.has_param("fresh") && (req.get_param_value("fresh") != "0"))
-	{
-		freshTimeout = g_defaultFreshTimeout;
-		if(req.has_param("timeout"))
-			freshTimeout = min(atof(req.get_param_value("timeout").c_str()), g_maxFreshTimeout);
-	}
+	double freshTimeout;
+	TriggerRequest trigger;
+	if(!ParseFreshParams(req, res, freshTimeout, trigger))
+		return;
 
 	shared_ptr<const HTTPExportWaveform> wfm;
 	uint64_t seq = 0;
 	chrono::system_clock::time_point updated;
-	int status = GetWaveform(req.matches[1], freshTimeout, wfm, seq, updated);
+	int status = GetWaveform(req.matches[1], freshTimeout, trigger, wfm, seq, updated);
 	if(status != httplib::StatusCode::OK_200)
 	{
-		res.status = status;
-		if(status == httplib::StatusCode::GatewayTimeout_504)
-			res.set_content("No new waveform before the timeout (is the scope triggering?)\n", "text/plain");
-		else
-			res.set_content("No such waveform, or none acquired yet\n", "text/plain");
+		SetErrorResponse(res, status, "waveform");
 		return;
 	}
 
@@ -773,6 +894,20 @@ static string FormatTimestamp(chrono::system_clock::time_point t)
 	char buf2[80];
 	snprintf(buf2, sizeof(buf2), "%s.%03dZ", buf, ms);
 	return buf2;
+}
+
+/**
+	@brief Sets a 404 or 504 response from WaitForUpdate() and friends, with a plain text explanation
+
+	@param what		"value" or "waveform"
+ */
+static void SetErrorResponse(httplib::Response& res, int status, const char* what)
+{
+	res.status = status;
+	if(status == httplib::StatusCode::GatewayTimeout_504)
+		res.set_content(string("No new ") + what + " before the timeout (is the scope triggering?)\n", "text/plain");
+	else
+		res.set_content(string("No such ") + what + ", or none acquired yet\n", "text/plain");
 }
 
 /**

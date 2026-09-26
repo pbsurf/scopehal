@@ -36,6 +36,7 @@
 #ifndef HTTPExportFilter_h
 #define HTTPExportFilter_h
 
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <map>
@@ -115,7 +116,16 @@ public:
 	HTTPExportServer(const HTTPExportServer& rhs) =delete;
 	HTTPExportServer& operator=(const HTTPExportServer& rhs) =delete;
 
-	void Configure(const std::string& host, uint16_t port);
+	///@brief Acquisition requested by a client, in increasing priority
+	enum TriggerRequest
+	{
+		TRIGGER_NONE,
+		TRIGGER_SINGLE,
+		TRIGGER_FORCE
+	};
+
+	void Configure(const std::string& host, uint16_t port, bool allowTrigger);
+	TriggerRequest TakeTriggerRequest();
 
 	std::string GetBaseURL();
 	std::string GetError();
@@ -136,9 +146,14 @@ protected:
 	std::string AllValuesToJson();
 	std::string ValuesToPrometheus();
 
+	bool ParseFreshParams(
+		const httplib::Request& req, httplib::Response& res, double& freshTimeout, TriggerRequest& trigger);
+	int WaitForUpdate(
+		std::unique_lock<std::mutex>& lock, const std::string& key, double freshTimeout, TriggerRequest trigger);
 	int GetWaveform(
 		const std::string& key,
 		double freshTimeout,
+		TriggerRequest trigger,
 		std::shared_ptr<const HTTPExportWaveform>& wfm,
 		uint64_t& seq,
 		std::chrono::system_clock::time_point& updated);
@@ -177,6 +192,12 @@ protected:
 
 	///@brief True while the listener is being stopped, so handlers waiting for a fresh waveform give up
 	bool m_stopping = false;
+
+	///@brief Acquisition requested by a client and not yet taken by the application (protected by m_entriesMutex)
+	TriggerRequest m_triggerRequest = TRIGGER_NONE;
+
+	///@brief True if clients may request acquisitions (read by request handlers, so atomic)
+	std::atomic<bool> m_allowTrigger;
 
 	///@brief Published values, by key
 	std::map<std::string, Entry> m_entries;
