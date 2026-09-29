@@ -105,7 +105,7 @@ void CSVImportFilter::OnFileNameChanged()
 		return;
 	}
 	fseek(fp, 0, SEEK_END);
-	off_t flen = ftello(fp);
+	int64_t flen = ftello(fp);
 	if(flen < 0)
 	{
 		AddErrorMessage("Bad file", string("Failed to seek file ") + fname);

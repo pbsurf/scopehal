@@ -153,8 +153,8 @@ void AddFilter::DoRefreshScalarVector(size_t iScalar, size_t iVector)
 		cap->Resize(len);
 		cap->PrepareForCpuAccess();
 
-		float* fin = (float*)__builtin_assume_aligned(sparse->m_samples.GetCpuPointer(), 16);
-		float* fdst = (float*)__builtin_assume_aligned(cap->m_samples.GetCpuPointer(), 16);
+		float* fin = (float*)ASSUME_ALIGNED(sparse->m_samples.GetCpuPointer(), 16);
+		float* fdst = (float*)ASSUME_ALIGNED(cap->m_samples.GetCpuPointer(), 16);
 		for(size_t i=0; i<len; i++)
 			fdst[i] = fin[i] + scale;
 
@@ -167,8 +167,8 @@ void AddFilter::DoRefreshScalarVector(size_t iScalar, size_t iVector)
 		cap->Resize(len);
 		cap->PrepareForCpuAccess();
 
-		float* fin = (float*)__builtin_assume_aligned(uniform->m_samples.GetCpuPointer(), 16);
-		float* fdst = (float*)__builtin_assume_aligned(cap->m_samples.GetCpuPointer(), 16);
+		float* fin = (float*)ASSUME_ALIGNED(uniform->m_samples.GetCpuPointer(), 16);
+		float* fdst = (float*)ASSUME_ALIGNED(cap->m_samples.GetCpuPointer(), 16);
 		for(size_t i=0; i<len; i++)
 			fdst[i] = fin[i] + scale;
 

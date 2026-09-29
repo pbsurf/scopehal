@@ -217,7 +217,7 @@ set(SCOPEPROTOCOLS_SOURCES
 	scopeprotocols.cpp
 	)
 
-add_library(scopeprotocols SHARED
+add_library(scopeprotocols ${SCOPEHAL_LIBRARY_TYPE}
 	${SCOPEPROTOCOLS_SOURCES})
 
 target_link_libraries(scopeprotocols

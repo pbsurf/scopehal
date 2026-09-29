@@ -38,21 +38,25 @@
 #include "../scopehal/Averager.h"
 #include "../scopehal/LevelCrossingDetector.h"
 
-struct __attribute__((packed)) ACRMSPushConstants
+#pragma pack(push, 1)
+struct ACRMSPushConstants
 {
 	uint32_t numSamples;
 	uint32_t numThreads;
 	uint32_t samplesPerThread;
 	float dcBias;
 };
+#pragma pack(pop)
 
-struct __attribute__((packed)) ACRMSTrendPushConstants
+#pragma pack(push, 1)
+struct ACRMSTrendPushConstants
 {
 	int64_t timescale;
 	int64_t numSamples;
 	uint32_t numEdgePairs;
 	float dcBias;
 };
+#pragma pack(pop)
 
 class ACRMSMeasurement : public Filter
 {

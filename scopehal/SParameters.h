@@ -116,7 +116,7 @@ public:
 		The waveforms may be sparse or uniformly sampled, but must be sampled at the same frequencies.
 	 */
 	template<class T>
-	__attribute__((noinline))
+	ATTR_NOINLINE
 	void ConvertFromWaveforms(const T* wmag, const T* wang)
 	{
 		if( (wmag == nullptr) || (wang == nullptr) )
@@ -147,7 +147,7 @@ public:
 		The waveforms may be sparse or uniformly sampled, but must be sampled at the same frequencies.
 	 */
 	template<class T>
-	__attribute__((noinline))
+	ATTR_NOINLINE
 	void ZeroFromWaveforms(const T* wmag, const T* wang)
 	{
 		if( (wmag == nullptr) || (wang == nullptr) )

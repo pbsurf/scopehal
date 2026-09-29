@@ -129,10 +129,10 @@ void ModbusInstrument::SendCommand(ModbusFunction function, const std::vector<ui
 	{
 		buffer.push_back((unsigned char)data[i]);
 	}
-	uint16_t crc = CalculateCRC(buffer.begin().base(), buffer.size());
+	uint16_t crc = CalculateCRC(buffer.data(), buffer.size());
 	buffer.push_back(reinterpret_cast<const unsigned char *>(&crc)[0]);
 	buffer.push_back(reinterpret_cast<const unsigned char *>(&crc)[1]);
-	m_transport->SendRawData(buffer.size(),buffer.begin().base());
+	m_transport->SendRawData(buffer.size(),buffer.data());
 }
 
 void ModbusInstrument::ReadResponse(ModbusFunction function, std::vector<uint8_t>* data)
@@ -144,7 +144,7 @@ void ModbusInstrument::ReadResponse(ModbusFunction function, std::vector<uint8_t
 	//    | 1 byte slave adress | 1 byte command function # (0x06) | 2 bytes register adress | 2 bytes register value | 2 bytes CRC |
 	// First read adress, and function
 	std::vector<unsigned char> buffer(2);
-	if(!m_transport->ReadRawData(2,buffer.begin().base()))
+	if(!m_transport->ReadRawData(2,buffer.data()))
 	{
 		LogError("Could not read Modbus slave adress and function response.\n");
 		return;
@@ -157,7 +157,7 @@ void ModbusInstrument::ReadResponse(ModbusFunction function, std::vector<uint8_t
 	if(function <= ReadAnalogInputRegisters)
 	{
 		// Read data length
-		if(!m_transport->ReadRawData(1,buffer.begin().base()))
+		if(!m_transport->ReadRawData(1,buffer.data()))
 		{
 			LogError("Could not read Modbus data length response.\n");
 			return;
@@ -171,7 +171,7 @@ void ModbusInstrument::ReadResponse(ModbusFunction function, std::vector<uint8_t
 	}
 	// Read data and CRC
 	buffer.reserve(dataLength+2);
-	if(!m_transport->ReadRawData(dataLength+2,buffer.begin().base()))
+	if(!m_transport->ReadRawData(dataLength+2,buffer.data()))
 	{
 		LogError("Could not read Modbus data and CRC response.\n");
 		return;

@@ -64,7 +64,7 @@ public:
 	{ return m_peaks; }
 
 	template<class T>
-	__attribute__((noinline))
+	ATTR_NOINLINE
 	void FindPeaks(
 		T* cap,
 		int64_t max_peaks,

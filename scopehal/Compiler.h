@@ -29,74 +29,59 @@
 
 /**
 	@file
-	@brief Declaration of Averager
+	@brief Portability macros for compiler-specific attributes and builtins (GCC/Clang vs MSVC),
+	and shims for POSIX functions the MSVC runtime lacks
  */
 
-#ifndef Averager_h
-#define Averager_h
+#ifndef Compiler_h
+#define Compiler_h
 
-#pragma pack(push, 1)
-struct ReductionSumPushConstants
+#include <stddef.h>
+#include <stdint.h>
+
+#ifdef _MSC_VER
+
+#include <intrin.h>
+#include <stdlib.h>
+
+//MSVC has no ssize_t. libiio's iio.h also typedefs it unless _SSIZE_T_DEFINED is set, so set that too
+#ifndef _SSIZE_T_DEFINED
+#define _SSIZE_T_DEFINED
+typedef ptrdiff_t ssize_t;
+#endif
+
+#define ATTR_NOINLINE				__declspec(noinline)
+
+//MSVC does not need a target attribute to use AVX2/AVX-512 intrinsics
+#define ATTR_TARGET(isa)
+
+#define ASSUME_ALIGNED(ptr, align)	(ptr)
+#define BSWAP32(x)					_byteswap_ulong(x)
+
+//POSIX functions that MinGW provides but the MSVC CRT does not
+#include <direct.h>		//mkdir(), getcwd(), chdir()
+#include <stdio.h>
+#include <time.h>
+
+#ifndef PATH_MAX
+#define PATH_MAX 260		//MAX_PATH
+#endif
+
+#define ftello _ftelli64
+#define fseeko _fseeki64
+
+inline struct tm* localtime_r(const time_t* timep, struct tm* result)
 {
-	uint32_t numSamples;
-	uint32_t numThreads;
-	uint32_t samplesPerThread;
-};
-#pragma pack(pop)
+	return (localtime_s(result, timep) == 0) ? result : nullptr;
+}
 
-/**
-	@brief Helper for GPU accelerated waveform averaging
- */
-class Averager
-{
-public:
-	Averager();
+#else
 
-	template<class T>
-	ATTR_NOINLINE
-	float Average(
-		T* wfm,
-		vk::raii::CommandBuffer& cmdBuf,
-		std::shared_ptr<QueueHandle> queue)
-	{
-		AssertTypeIsAnalogWaveform(wfm);
+#define ATTR_NOINLINE				__attribute__((noinline))
+#define ATTR_TARGET(isa)			__attribute__((target(isa)))
+#define ASSUME_ALIGNED(ptr, align)	__builtin_assume_aligned((ptr), (align))
+#define BSWAP32(x)					__builtin_bswap32(x)
 
-		//This value experimentally gives the best speedup for an NVIDIA 2080 Ti vs an Intel Xeon Gold 6144
-		//Maybe consider dynamic tuning in the future at initialization?
-		const uint64_t numThreads = 16384;
-
-		cmdBuf.begin({});
-
-		//Do the reduction summation
-		size_t depth = wfm->size();
-		ReductionSumPushConstants push;
-		push.numSamples = depth;
-		push.numThreads = numThreads;
-		push.samplesPerThread = (depth + numThreads) / numThreads;
-		m_temporaryResults.resize(numThreads);
-
-		m_computePipeline->BindBufferNonblocking(0, m_temporaryResults, cmdBuf, true);
-		m_computePipeline->BindBufferNonblocking(1, wfm->m_samples, cmdBuf);
-		m_computePipeline->Dispatch(cmdBuf, push, numThreads, 1);
-
-		m_temporaryResults.MarkModifiedFromGpu();
-
-		cmdBuf.end();
-		queue->SubmitAndBlock(cmdBuf);
-
-		//Do the final summation
-		m_temporaryResults.PrepareForCpuAccess();
-		float finalSum = 0;
-		for(uint64_t i=0; i<numThreads; i++)
-			finalSum += m_temporaryResults[i];
-
-		return finalSum / depth;
-	}
-
-protected:
-	std::unique_ptr<ComputePipeline> m_computePipeline;
-
-	AcceleratorBuffer<float> m_temporaryResults;
-};
+#endif
 
 #endif

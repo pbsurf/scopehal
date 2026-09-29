@@ -34,7 +34,9 @@
  */
 #include "scopehal.h"
 #include "scopehal-version.h"
+#ifndef _WIN32
 #include <libgen.h>
+#endif
 #include <filesystem>
 
 #include "AgilentOscilloscope.h"
@@ -1140,7 +1142,7 @@ uint32_t CRC32(const uint8_t* bytes, size_t start, size_t end)
 	uint32_t crc = 0xffffffff;
 	for(size_t n=start; n <= end; n++)
 		crc = g_crc32Table[ (crc & 0xff) ^ bytes[n] ] ^ (crc >> 8);
-	return __builtin_bswap32(~crc);
+	return BSWAP32(~crc);
 }
 
 uint32_t CRC32(const vector<uint8_t>& bytes)

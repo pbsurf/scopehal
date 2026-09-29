@@ -79,8 +79,8 @@ void DoCopy(T* w_in, T* w_out, size_t start_sample, size_t end_sample)
 {
 	w_out->Resize(end_sample - start_sample);
 
-	memcpy(__builtin_assume_aligned(&w_out->m_samples[0], 16),
-		(uint8_t*)__builtin_assume_aligned(&w_in->m_samples[0], 16) + (start_sample*sizeof(w_in->m_samples[0])),
+	memcpy(ASSUME_ALIGNED(&w_out->m_samples[0], 16),
+		(uint8_t*)ASSUME_ALIGNED(&w_in->m_samples[0], 16) + (start_sample*sizeof(w_in->m_samples[0])),
 		(end_sample - start_sample) * sizeof(w_in->m_samples[0]));
 
 	w_out->m_triggerPhase = GetOffsetScaled(w_in, start_sample);

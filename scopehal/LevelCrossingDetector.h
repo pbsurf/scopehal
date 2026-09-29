@@ -35,7 +35,8 @@
 #ifndef LevelCrossingDetector_h
 #define LevelCrossingDetector_h
 
-struct __attribute__((packed)) ZeroCrossingPushConstants
+#pragma pack(push, 1)
+struct ZeroCrossingPushConstants
 {
 	int64_t	triggerPhase;
 	int64_t timescale;
@@ -45,18 +46,23 @@ struct __attribute__((packed)) ZeroCrossingPushConstants
 	float threshold;
 	float ftimescale;
 };
+#pragma pack(pop)
 
-struct __attribute__((packed)) PreGatherPushConstants
+#pragma pack(push, 1)
+struct PreGatherPushConstants
 {
 	uint32_t numBlocks;
 	uint32_t stride;
 };
+#pragma pack(pop)
 
-struct __attribute__((packed)) GatherPushConstants
+#pragma pack(push, 1)
+struct GatherPushConstants
 {
 	uint32_t numBlocks;
 	uint32_t stride;
 };
+#pragma pack(pop)
 
 /**
 	@brief Helper for GPU accelerated level-crossing searches

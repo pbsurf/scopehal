@@ -274,7 +274,7 @@ endif()
 
 configure_file(config.h.in config.h)
 
-add_library(scopehal SHARED
+add_library(scopehal ${SCOPEHAL_LIBRARY_TYPE}
 	${SCOPEHAL_SOURCES})
 
 # mingw64 build using

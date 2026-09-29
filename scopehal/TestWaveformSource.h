@@ -40,7 +40,8 @@
 #include "VulkanFFTPlan.h"
 #include <random>
 
-struct __attribute__((packed)) DegradeSerialDataPushConstants
+#pragma pack(push, 1)
+struct DegradeSerialDataPushConstants
 {
 	uint32_t numSamples;
 	uint32_t samplesPerThread;
@@ -49,8 +50,10 @@ struct __attribute__((packed)) DegradeSerialDataPushConstants
 	float scale;
 	float sigma;
 };
+#pragma pack(pop)
 
-struct __attribute__((packed)) NoisySinePushConstants
+#pragma pack(push, 1)
+struct NoisySinePushConstants
 {
 	uint32_t fpfreq;
 	uint32_t numSamples;
@@ -60,8 +63,10 @@ struct __attribute__((packed)) NoisySinePushConstants
 	float scale;
 	float sigma;
 };
+#pragma pack(pop)
 
-struct __attribute__((packed)) NoisySineSumPushConstants
+#pragma pack(push, 1)
+struct NoisySineSumPushConstants
 {
 	uint32_t fpfreq1;
 	uint32_t fpfreq2;
@@ -73,6 +78,7 @@ struct __attribute__((packed)) NoisySineSumPushConstants
 	float scale;
 	float sigma;
 };
+#pragma pack(pop)
 
 /**
 	@brief Helper class for generating test waveforms

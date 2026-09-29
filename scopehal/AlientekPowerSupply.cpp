@@ -247,7 +247,7 @@ void AlientekPowerSupply::SendReceiveReport(Function function, int sequence, std
 	}
 
 	// CRC
-	uint16_t crc = CalculateCRC(sendData.begin().base(), sendData.size());
+	uint16_t crc = CalculateCRC(sendData.data(), sendData.size());
 	PushUint16(&sendData,crc);
 
 #define HEADER_LENGTH	4

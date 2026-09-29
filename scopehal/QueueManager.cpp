@@ -34,6 +34,7 @@
  */
 
 #include "log.h"
+#include "Compiler.h"
 #include "QueueManager.h"
 
 using namespace std;

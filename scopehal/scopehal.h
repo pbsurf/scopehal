@@ -62,6 +62,7 @@
 #include <yaml-cpp/yaml.h>
 
 #include "../log/log.h"
+#include "Compiler.h"
 #include "../xptools/TimeUtil.h"
 
 #include "config.h"

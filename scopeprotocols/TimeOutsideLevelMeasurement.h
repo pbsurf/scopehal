@@ -35,6 +35,11 @@
 #ifndef TimeOutsideLevelMeasurement_h
 #define TimeOutsideLevelMeasurement_h
 
+//The Windows SDK (kernelspecs.h) defines HIGH_LEVEL as an IRQL constant
+#ifdef _WIN32
+#undef HIGH_LEVEL
+#endif
+
 class TimeOutsideLevelMeasurement : public Filter
 {
 public:

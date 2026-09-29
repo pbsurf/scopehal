@@ -504,7 +504,7 @@ void Ethernet100BaseT1Decoder::Refresh(vk::raii::CommandBuffer& cmdBuf, shared_p
 				length,
 				cap,
 				false,
-				__builtin_bswap32(m_crcs[j]));
+				BSWAP32(m_crcs[j]));
 		}
 	}
 

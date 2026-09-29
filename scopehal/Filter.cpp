@@ -293,7 +293,7 @@ void Filter::FillDurationsGeneric(SparseWaveformBase& wfm)
 /**
 	@brief AVX2 optimized version of FillDurationsGeneric()
  */
-__attribute__((target("avx2")))
+ATTR_TARGET("avx2")
 void Filter::FillDurationsAVX2(SparseWaveformBase& wfm)
 {
 	size_t len = wfm.size();
@@ -725,7 +725,7 @@ void Filter::FindPeaks(UniformAnalogWaveform* data, float peak_threshold, vector
 	thresh_diff->m_timescale = data->m_timescale;
 	thresh_diff->Resize(len);
 
-	float* fin = (float*)__builtin_assume_aligned(data->m_samples.GetCpuPointer(), 16);
+	float* fin = (float*)ASSUME_ALIGNED(data->m_samples.GetCpuPointer(), 16);
 
 	bool cur = false;
 

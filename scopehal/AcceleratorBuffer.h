@@ -537,7 +537,7 @@ public:
 	/**
 		@brief Creates a new AcceleratorBuffer with no content
 	 */
-	__attribute__((noinline))
+	ATTR_NOINLINE
 	AcceleratorBuffer(const std::string& name = "")
 		: AcceleratorBufferBase(name)
 		, m_cpuMemoryType(MEM_TYPE_NULL)
@@ -724,7 +724,7 @@ public:
 	/**
 		@brief Copies our content from a std::vector
 	 */
-	 __attribute__((noinline))
+	 ATTR_NOINLINE
 	 void CopyFrom(const std::vector<T>& rhs)
 	 {
 		assert(std::is_trivially_copyable<T>::value);
@@ -744,7 +744,7 @@ public:
 
 		TODO perf counters
 	 */
-	 __attribute__((noinline))
+	 ATTR_NOINLINE
 	void CopyFrom(const AcceleratorBuffer<T>& rhs, bool reallocateToMatch = true)
 	{
 		//Copy placement hints from the other instance, then resize to match
@@ -798,7 +798,7 @@ public:
 
 		TODO perf counters
 	 */
-	 __attribute__((noinline))
+	 ATTR_NOINLINE
 	void CopyFromNonblocking(
 		vk::raii::CommandBuffer& cmdBuf,
 		const AcceleratorBuffer<T>& rhs,
@@ -862,7 +862,7 @@ protected:
 	/**
 		@brief Reallocates the buffer so that it contains exactly size elements
 	 */
-	__attribute__((noinline))
+	ATTR_NOINLINE
 	void Reallocate(size_t size)
 	{
 		if(size == 0)
@@ -1695,7 +1695,7 @@ protected:
 	/**
 		@brief Allocates a buffer for CPU access
 	 */
-	__attribute__((noinline))
+	ATTR_NOINLINE
 	void AllocateCpuBuffer(size_t size)
 	{
 		if(size == 0)
@@ -1812,7 +1812,7 @@ protected:
 		By this point AllocateCpuBuffer() has been called so m_cpuMemoryType points to the type of the new buffer,
 		not the one we're getting rid of.
 	 */
-	__attribute__((noinline))
+	ATTR_NOINLINE
 	void FreeCpuPointer(T* ptr, MemoryType type, size_t size)
 	{
 		//Call destructors iff type is not trivially copyable
@@ -1856,7 +1856,7 @@ protected:
 		By this point AllocateCpuBuffer() has been called so m_cpuMemoryType points to the type of the new buffer,
 		not the one we're getting rid of.
 	 */
-	__attribute__((noinline))
+	ATTR_NOINLINE
 	void FreeCpuPointer(T* ptr, std::unique_ptr<vk::raii::DeviceMemory>& buf, MemoryType type, size_t size)
 	{
 		switch(type)
@@ -1875,7 +1875,7 @@ protected:
 
 		@return true on success, false on failure
 	 */
-	__attribute__((noinline))
+	ATTR_NOINLINE
 	bool AllocateGpuBuffer(size_t size)
 	{
 		assert(std::is_trivially_copyable<T>::value);
@@ -1968,7 +1968,7 @@ protected:
 	/**
 		@brief Pushes our friendly name to the underlying Vulkan objects
 	 */
-	__attribute__((noinline))
+	ATTR_NOINLINE
 	void UpdateGpuNames()
 	{
 		std::string sname = m_name;
@@ -1995,7 +1995,7 @@ protected:
 	/**
 		@brief Pushes our friendly name to the underlying Vulkan objects
 	 */
-	__attribute__((noinline))
+	ATTR_NOINLINE
 	void UpdateCpuNames()
 	{
 		std::string sname = m_name;
@@ -2048,7 +2048,7 @@ public:
 	/**
 		@brief Dump the raw contents of the buffer to a file for debugging
 	 */
-	__attribute__((noinline))
+	ATTR_NOINLINE
 	void DebugDumpToFile(const std::string& fname)
 	{
 		FILE* fp = fopen(fname.c_str(), "wb");

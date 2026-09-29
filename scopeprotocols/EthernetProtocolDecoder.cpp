@@ -393,7 +393,7 @@ void EthernetProtocolDecoder::BytesToFrames(
 				//Start of FCS? Record start time
 				if(nbytes == 0)
 				{
-					crc_expected = __builtin_bswap32(crc32(0, &bytes[crcstart], i - crcstart));
+					crc_expected = BSWAP32(crc32(0, &bytes[crcstart], i - crcstart));
 
 					start = starts[i];
 					cap->m_offsets.push_back(start / cap->m_timescale);
@@ -882,7 +882,7 @@ void EthernetProtocolDecoder::BytesToFramesUnitTimescale(
 					if(offloadCRC.has_value())
 						crc_expected = offloadCRC.value();
 					else
-						crc_expected = __builtin_bswap32(crc32(0, &bytes[crcstart], i - crcstart));
+						crc_expected = BSWAP32(crc32(0, &bytes[crcstart], i - crcstart));
 
 					start = starts[i];
 					cap->m_offsets.push_back(start);

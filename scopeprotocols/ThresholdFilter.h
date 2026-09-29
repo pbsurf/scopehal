@@ -35,11 +35,13 @@
 #ifndef ThresholdFilter_h
 #define ThresholdFilter_h
 
-struct __attribute__((packed)) ThresholdPushConstants
+#pragma pack(push, 1)
+struct ThresholdPushConstants
 {
 	uint32_t numSamples;
 	float threshold;
 };
+#pragma pack(pop)
 
 class ThresholdFilter : public Filter
 {

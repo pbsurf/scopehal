@@ -165,8 +165,8 @@ void DivideFilter::RefreshScalarVector(size_t iScalar, size_t iVector)
 		cap->Resize(len);
 		cap->PrepareForCpuAccess();
 
-		float* fin = (float*)__builtin_assume_aligned(sparse->m_samples.GetCpuPointer(), 16);
-		float* fdst = (float*)__builtin_assume_aligned(cap->m_samples.GetCpuPointer(), 16);
+		float* fin = (float*)ASSUME_ALIGNED(sparse->m_samples.GetCpuPointer(), 16);
+		float* fdst = (float*)ASSUME_ALIGNED(cap->m_samples.GetCpuPointer(), 16);
 		if(iVector == 0)
 		{
 			for(size_t i=0; i<len; i++)
@@ -187,8 +187,8 @@ void DivideFilter::RefreshScalarVector(size_t iScalar, size_t iVector)
 		cap->Resize(len);
 		cap->PrepareForCpuAccess();
 
-		float* fin = (float*)__builtin_assume_aligned(uniform->m_samples.GetCpuPointer(), 16);
-		float* fdst = (float*)__builtin_assume_aligned(cap->m_samples.GetCpuPointer(), 16);
+		float* fin = (float*)ASSUME_ALIGNED(uniform->m_samples.GetCpuPointer(), 16);
+		float* fdst = (float*)ASSUME_ALIGNED(cap->m_samples.GetCpuPointer(), 16);
 		if(iVector == 0)
 		{
 			for(size_t i=0; i<len; i++)
@@ -263,9 +263,9 @@ void DivideFilter::DoRefreshVectorVector()
 		cap->PrepareForCpuAccess();
 		cap->MarkModifiedFromCpu();
 
-		fa = (float*)__builtin_assume_aligned(&ua->m_samples[0], 16);
-		fb = (float*)__builtin_assume_aligned(&ub->m_samples[0], 16);
-		fdst = (float*)__builtin_assume_aligned(&cap->m_samples[0], 16);
+		fa = (float*)ASSUME_ALIGNED(&ua->m_samples[0], 16);
+		fb = (float*)ASSUME_ALIGNED(&ub->m_samples[0], 16);
+		fdst = (float*)ASSUME_ALIGNED(&cap->m_samples[0], 16);
 	}
 
 	//Sparse / sparse path
@@ -276,9 +276,9 @@ void DivideFilter::DoRefreshVectorVector()
 		cap->PrepareForCpuAccess();
 		cap->MarkModifiedFromCpu();
 
-		fa = (float*)__builtin_assume_aligned(&sa->m_samples[0], 16);
-		fb = (float*)__builtin_assume_aligned(&sb->m_samples[0], 16);
-		fdst = (float*)__builtin_assume_aligned(&cap->m_samples[0], 16);
+		fa = (float*)ASSUME_ALIGNED(&sa->m_samples[0], 16);
+		fb = (float*)ASSUME_ALIGNED(&sb->m_samples[0], 16);
+		fdst = (float*)ASSUME_ALIGNED(&cap->m_samples[0], 16);
 	}
 
 	else

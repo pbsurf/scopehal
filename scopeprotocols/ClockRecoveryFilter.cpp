@@ -838,7 +838,7 @@ void ClockRecoveryFilter::InnerLoopWithNoGating(
 /**
 	@brief AVX2 optimized version of FillSquarewaveGeneric()
  */
-__attribute__((target("avx2")))
+ATTR_TARGET("avx2")
 void ClockRecoveryFilter::FillSquarewaveAVX2(SparseDigitalWaveform& cap)
 {
 	size_t len = cap.m_offsets.size();

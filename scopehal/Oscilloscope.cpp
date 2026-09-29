@@ -1117,7 +1117,7 @@ void Oscilloscope::Convert8BitSamplesGeneric(float* pout, const int8_t* pin, flo
 /**
 	@brief Optimized version of Convert8BitSamples()
  */
-__attribute__((target("avx2")))
+ATTR_TARGET("avx2")
 void Oscilloscope::Convert8BitSamplesAVX2(float* pout, const int8_t* pin, float gain, float offset, size_t count)
 {
 	unsigned int end = count - (count % 32);
@@ -1249,7 +1249,7 @@ void Oscilloscope::ConvertUnsigned8BitSamplesGeneric(float* pout, const uint8_t*
 /**
 	@brief Optimized version of ConvertUnsigned8BitSamples()
  */
-__attribute__((target("avx2")))
+ATTR_TARGET("avx2")
 void Oscilloscope::ConvertUnsigned8BitSamplesAVX2(float* pout, const uint8_t* pin, float gain, float offset, size_t count)
 {
 	unsigned int end = count - (count % 32);

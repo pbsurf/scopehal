@@ -103,8 +103,8 @@ void CurrentShuntFilter::Refresh(
 		cap->Resize(len);
 		cap->PrepareForCpuAccess();
 
-		float* fsrc = (float*)__builtin_assume_aligned(udin->m_samples.GetCpuPointer(), 16);
-		float* fdst = (float*)__builtin_assume_aligned(cap->m_samples.GetCpuPointer(), 16);
+		float* fsrc = (float*)ASSUME_ALIGNED(udin->m_samples.GetCpuPointer(), 16);
+		float* fdst = (float*)ASSUME_ALIGNED(cap->m_samples.GetCpuPointer(), 16);
 
 		for(size_t i=0; i<len; i++)
 			fdst[i] = fsrc[i] * ishunt;
@@ -118,8 +118,8 @@ void CurrentShuntFilter::Refresh(
 		cap->Resize(len);
 		cap->PrepareForCpuAccess();
 
-		float* fsrc = (float*)__builtin_assume_aligned(sdin->m_samples.GetCpuPointer(), 16);
-		float* fdst = (float*)__builtin_assume_aligned(cap->m_samples.GetCpuPointer(), 16);
+		float* fsrc = (float*)ASSUME_ALIGNED(sdin->m_samples.GetCpuPointer(), 16);
+		float* fdst = (float*)ASSUME_ALIGNED(cap->m_samples.GetCpuPointer(), 16);
 
 		for(size_t i=0; i<len; i++)
 			fdst[i] = fsrc[i] * ishunt;

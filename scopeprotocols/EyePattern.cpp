@@ -493,7 +493,7 @@ size_t EyePattern::FindCenterOfMass(vector<float>& hist, size_t start, size_t en
 }
 
 #ifdef __x86_64__
-__attribute__((target("avx2")))
+ATTR_TARGET("avx2")
 void EyePattern::DensePackedInnerLoopAVX2(
 	UniformAnalogWaveform* waveform,
 	int64_t* data,
@@ -540,7 +540,7 @@ void EyePattern::DensePackedInnerLoopAVX2(
 	{
 		//Figure out timestamp of this sample within the UI.
 		//This doesn't vectorize well, but it's pretty fast.
-		int32_t offset[8] __attribute__((aligned(32))) = {0};
+		alignas(32) int32_t offset[8] = {0};
 		for(size_t j=0; j<8; j++)
 		{
 			size_t k = i+j;
@@ -610,13 +610,13 @@ void EyePattern::DensePackedInnerLoopAVX2(
 		voff				= _mm256_add_epi32(voff, vxfloori);
 
 		//Save stuff for output loop
-		int32_t bin2[8]				__attribute__((aligned(32)));
-		uint32_t off[8]				__attribute__((aligned(32)));
+		alignas(32) int32_t bin2[8];
+		alignas(32) uint32_t off[8];
 		_mm256_store_si256((__m256i*)bin2, vbin2i);
 		_mm256_store_si256((__m256i*)off, voff);
 
 		//Vector bounds check
-		int32_t oob[8]	__attribute__((aligned(32)));
+		alignas(32) int32_t oob[8];
 		__m256i oob_x 		= _mm256_cmpgt_epi32(vxfloori, vxmax);
 		__m256i oob_off		= _mm256_cmpgt_epi32(voff, vbufmax);
 		__m256i oob_any		= _mm256_or_si256(oob_x, oob_off);
@@ -696,7 +696,7 @@ void EyePattern::DensePackedInnerLoopAVX2(
 	waveform->MarkModifiedFromCpu();
 }
 
-__attribute__((target("avx2,fma")))
+ATTR_TARGET("avx2,fma")
 void EyePattern::DensePackedInnerLoopAVX2FMA(
 	UniformAnalogWaveform* waveform,
 	int64_t* data,
@@ -742,7 +742,7 @@ void EyePattern::DensePackedInnerLoopAVX2FMA(
 	{
 		//Figure out timestamp of this sample within the UI.
 		//This doesn't vectorize well, but it's pretty fast.
-		int32_t offset[8] __attribute__((aligned(32))) = {0};
+		alignas(32) int32_t offset[8] = {0};
 		for(size_t j=0; j<8; j++)
 		{
 			size_t k = i+j;
@@ -809,13 +809,13 @@ void EyePattern::DensePackedInnerLoopAVX2FMA(
 		voff				= _mm256_add_epi32(voff, vxfloori);
 
 		//Save stuff for output loop
-		int32_t bin2[8]				__attribute__((aligned(32)));
-		uint32_t off[8]				__attribute__((aligned(32)));
+		alignas(32) int32_t bin2[8];
+		alignas(32) uint32_t off[8];
 		_mm256_store_si256((__m256i*)bin2, vbin2i);
 		_mm256_store_si256((__m256i*)off, voff);
 
 		//Vector bounds check
-		int32_t oob[8]	__attribute__((aligned(32)));
+		alignas(32) int32_t oob[8];
 		__m256i oob_x 		= _mm256_cmpgt_epi32(vxfloori, vxmax);
 		__m256i oob_off		= _mm256_cmpgt_epi32(voff, vbufmax);
 		__m256i oob_any		= _mm256_or_si256(oob_x, oob_off);
@@ -895,7 +895,7 @@ void EyePattern::DensePackedInnerLoopAVX2FMA(
 	waveform->MarkModifiedFromCpu();
 }
 
-__attribute__((target("avx512f,fma")))
+ATTR_TARGET("avx512f,fma")
 void EyePattern::DensePackedInnerLoopAVX512F(
 	UniformAnalogWaveform* waveform,
 	int64_t* data,
@@ -939,7 +939,7 @@ void EyePattern::DensePackedInnerLoopAVX512F(
 	{
 		//Figure out timestamp of this sample within the UI.
 		//This doesn't vectorize well, but it's pretty fast.
-		int32_t offset[16] __attribute__((aligned(64))) = {0};
+		alignas(64) int32_t offset[16] = {0};
 		for(size_t j=0; j<16; j++)
 		{
 			size_t k = i+j;
@@ -1006,9 +1006,9 @@ void EyePattern::DensePackedInnerLoopAVX512F(
 		voff				= _mm512_add_epi32(voff, vxfloori);
 
 		//Save stuff for output loop
-		int32_t pixel_x_round[16]	__attribute__((aligned(64)));
-		int32_t bin2[16]	__attribute__((aligned(64)));
-		uint32_t off[16]	__attribute__((aligned(64)));
+		alignas(64) int32_t pixel_x_round[16];
+		alignas(64) int32_t bin2[16];
+		alignas(64) uint32_t off[16];
 		_mm512_store_si512((__m512i*)pixel_x_round, vxfloori);
 		_mm512_store_si512((__m512i*)bin2, vbin2i);
 		_mm512_store_si512((__m512i*)off, voff);

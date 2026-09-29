@@ -396,7 +396,7 @@ public:
 		TODO: validate that this works correctly for sparsely sampled waveforms?
 	 */
 	template<class T>
-	__attribute__((noinline))
+	ATTR_NOINLINE
 	static float InterpolateTime(T* cap, size_t a, float voltage)
 	{
 		AssertTypeIsAnalogWaveform(cap);
@@ -449,7 +449,7 @@ public:
 		@brief Gets the lowest and highest voltage of a waveform
 	 */
 	template<class T>
-	__attribute__((noinline))
+	ATTR_NOINLINE
 	static void GetMinMaxVoltage(T* cap, float& vmin, float& vmax)
 	{
 		AssertTypeIsAnalogWaveform(cap);
@@ -469,7 +469,7 @@ public:
 		@brief Gets the min and max voltage of a waveform on the GPU
 	 */
 	template<class T>
-	__attribute__((noinline))
+	ATTR_NOINLINE
 	static void GetMinMaxVoltage(
 		vk::raii::CommandBuffer& cmdBuf,
 		std::shared_ptr<QueueHandle> queue,
@@ -518,7 +518,7 @@ public:
 		@brief Gets the lowest voltage of a waveform
 	 */
 	template<class T>
-	__attribute__((noinline))
+	ATTR_NOINLINE
 	static float GetMinVoltage(T* cap)
 	{
 		AssertTypeIsAnalogWaveform(cap);
@@ -548,7 +548,7 @@ public:
 		@brief Gets the highest voltage of a waveform
 	 */
 	template<class T>
-	__attribute__((noinline))
+	ATTR_NOINLINE
 	static float GetMaxVoltage(T* cap)
 	{
 		AssertTypeIsAnalogWaveform(cap);
@@ -643,7 +643,7 @@ public:
 		@brief Gets the most probable "0" and "1" level for a digital waveform
 	 */
 	template<class T>
-	__attribute__((noinline))
+	ATTR_NOINLINE
 	static void GetBaseAndTopVoltage(
 		vk::raii::CommandBuffer& cmdBuf,
 		std::shared_ptr<QueueHandle> queue,
@@ -718,7 +718,7 @@ public:
 		@brief Gets the most probable "0" level for a digital waveform
 	 */
 	template<class T>
-	__attribute__((noinline))
+	ATTR_NOINLINE
 	static float GetBaseVoltage(T* cap)
 	{
 		AssertTypeIsAnalogWaveform(cap);
@@ -762,7 +762,7 @@ public:
 		@brief Gets the most probable "1" level for a digital waveform
 	 */
 	template<class T>
-	__attribute__((noinline))
+	ATTR_NOINLINE
 	static float GetTopVoltage(T* cap)
 	{
 		AssertTypeIsAnalogWaveform(cap);
@@ -806,7 +806,7 @@ public:
 		@brief Gets the average voltage of a waveform
 	 */
 	template<class T>
-	__attribute__((noinline))
+	ATTR_NOINLINE
 	static float GetAvgVoltage(T* cap)
 	{
 		AssertTypeIsAnalogWaveform(cap);
@@ -839,7 +839,7 @@ public:
 		@param bins	Number of histogram bins
 	 */
 	template<class T>
-	__attribute__((noinline))
+	ATTR_NOINLINE
 	static std::vector<size_t> MakeHistogram(T* cap, float low, float high, size_t bins)
 	{
 		AssertTypeIsAnalogWaveform(cap);
@@ -898,7 +898,7 @@ public:
 		@param bins	Number of histogram bins
 	 */
 	template<class T>
-	__attribute__((noinline))
+	ATTR_NOINLINE
 	static void MakeHistogram(
 		vk::raii::CommandBuffer& cmdBuf,
 		std::shared_ptr<QueueHandle> queue,
@@ -953,7 +953,7 @@ public:
 		@param bins	Number of histogram bins
 	 */
 	template<class T>
-	__attribute__((noinline))
+	ATTR_NOINLINE
 	static std::vector<size_t> MakeHistogramClipped(T* cap, float low, float high, size_t bins)
 	{
 		AssertTypeIsAnalogWaveform(cap);
@@ -995,7 +995,7 @@ public:
 		@param cpuOnly	true to mark the output waveform as a CPU-side temporary buffer that will never be used on the GPU
 	 */
 	template<class T, class R, class S>
-	__attribute__((noinline))
+	ATTR_NOINLINE
 	static void SampleOnAnyEdges(T* data, R* clock, SparseWaveform<S>& samples, bool cpuOnly = true)
 	{
 		//Compile-time check to make sure inputs are correct types
@@ -1093,7 +1093,7 @@ public:
 		@param samples	Output waveform. Must be sparse and same data type as data.
 	 */
 	template<class T>
-	__attribute__((noinline))
+	ATTR_NOINLINE
 	static void SampleOnAnyEdgesBase(WaveformBase* data, WaveformBase* clock, SparseWaveform<T>& samples)
 	{
 		data->PrepareForCpuAccess();
@@ -1129,7 +1129,7 @@ public:
 		@param samples	Output waveform. Must be sparse and same data type as data.
 	 */
 	template<class T, class R, class S>
-	__attribute__((noinline))
+	ATTR_NOINLINE
 	static void SampleOnRisingEdges(T* data, R* clock, SparseWaveform<S>& samples)
 	{
 		//Compile-time check to make sure inputs are correct types
@@ -1191,7 +1191,7 @@ public:
 		@param samples	Output waveform. Must be sparse and same data type as data.
 	 */
 	template<class T>
-	__attribute__((noinline))
+	ATTR_NOINLINE
 	static void SampleOnRisingEdgesBase(WaveformBase* data, WaveformBase* clock, SparseWaveform<T>& samples)
 	{
 		data->PrepareForCpuAccess();
@@ -1227,7 +1227,7 @@ public:
 		@param samples	Output waveform. Must be sparse and same data type as data.
 	 */
 	template<class T, class R, class S>
-	__attribute__((noinline))
+	ATTR_NOINLINE
 	static void SampleOnFallingEdges(T* data, R* clock, SparseWaveform<S>& samples)
 	{
 		//Compile-time check to make sure inputs are correct types
@@ -1288,7 +1288,7 @@ public:
 		@param samples	Output waveform
 	 */
 	template<class T, class R>
-	__attribute__((noinline))
+	ATTR_NOINLINE
 	static void SampleOnAnyEdgesWithInterpolation(T* data, R* clock, SparseAnalogWaveform& samples)
 	{
 		//Compile-time check to make sure inputs are correct types
@@ -1354,7 +1354,7 @@ public:
 		@param samples	Output waveform. Must be sparse and same data type as data.
 	 */
 	template<class T>
-	__attribute__((noinline))
+	ATTR_NOINLINE
 	static void SampleOnAnyEdgesBaseWithInterpolation(WaveformBase* data, WaveformBase* clock, SparseWaveform<T>& samples)
 	{
 		data->PrepareForCpuAccess();

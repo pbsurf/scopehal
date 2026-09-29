@@ -197,7 +197,7 @@ size_t TinySA::ConverseBinary(const string& commandString, vector<uint8_t>& data
 			toRead = min((size_t)3,length-dataRead);
 			if(dataRead == 0)
 				toRead+=1; // Read leading '{' in addition to first data at the beginning of the frame
-			newBytes = m_transport->ReadRawData(toRead,data.begin().base()+dataRead);
+			newBytes = m_transport->ReadRawData(toRead,data.data()+dataRead);
 			// Update progress (we're not using progress from ReadRawData since we need to be able to drive the number of bytes to be read at each step)
 			ChannelsDownloadStatusUpdate(0, InstrumentChannel::DownloadState::DOWNLOAD_IN_PROGRESS, ((float)dataRead + ((float)newBytes)) / (float)length);
 			if(newBytes > 0)
