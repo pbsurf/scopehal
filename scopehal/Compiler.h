@@ -44,6 +44,12 @@
 #include <intrin.h>
 #include <stdlib.h>
 
+//The AVX2/AVX-512 code paths are guarded by GCC's __x86_64__; MSVC only defines _M_X64 (clang-cl defines both).
+//ARM64EC also defines _M_X64, but can't run AVX code.
+#if defined(_M_X64) && !defined(_M_ARM64EC) && !defined(__x86_64__)
+#define __x86_64__ 1
+#endif
+
 //MSVC has no ssize_t. libiio's iio.h also typedefs it unless _SSIZE_T_DEFINED is set, so set that too
 #ifndef _SSIZE_T_DEFINED
 #define _SSIZE_T_DEFINED

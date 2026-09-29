@@ -287,11 +287,40 @@ void DetectCPUFeatures()
 
 #ifdef __x86_64__
 	//Check CPU features
+#ifdef _MSC_VER
+	//No __builtin_cpu_supports, so read CPUID directly. Features also need OS support for saving the
+	//YMM (AVX) and ZMM/opmask (AVX-512) registers, which XCR0 reports.
+	int regs[4];
+	__cpuid(regs, 0);
+	int maxLeaf = regs[0];
+
+	__cpuid(regs, 1);
+	bool fma = (regs[2] & (1 << 12)) != 0;
+	bool osxsave = (regs[2] & (1 << 27)) != 0;
+
+	uint64_t xcr0 = osxsave ? _xgetbv(0) : 0;
+	bool osAvx = (xcr0 & 0x06) == 0x06;
+	bool osAvx512 = (xcr0 & 0xe6) == 0xe6;
+
+	int leaf7ebx = 0;
+	if(maxLeaf >= 7)
+	{
+		__cpuidex(regs, 7, 0);
+		leaf7ebx = regs[1];
+	}
+
+	g_hasFMA = osAvx && fma;
+	g_hasAvx2 = osAvx && (leaf7ebx & (1 << 5));
+	g_hasAvx512F = osAvx512 && (leaf7ebx & (1 << 16));
+	g_hasAvx512DQ = osAvx512 && (leaf7ebx & (1 << 17));
+	g_hasAvx512VL = osAvx512 && (leaf7ebx & (1u << 31));
+#else
 	g_hasAvx512F = __builtin_cpu_supports("avx512f");
 	g_hasAvx512VL = __builtin_cpu_supports("avx512vl");
 	g_hasAvx512DQ = __builtin_cpu_supports("avx512dq");
 	g_hasAvx2 = __builtin_cpu_supports("avx2");
 	g_hasFMA = __builtin_cpu_supports("fma");
+#endif
 
 	if(g_hasAvx2)
 		LogDebug("* AVX2\n");
