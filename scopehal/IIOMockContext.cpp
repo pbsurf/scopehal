@@ -50,6 +50,28 @@ static const int64_t g_minSampleRateHz = 2083334;
 static const int64_t g_maxSampleRateHz = 61440000;
 static const int64_t g_minBandwidthHz = 200000;
 
+/**
+	@brief Gets the sample rate the AD936x actually runs at when asked for a given rate
+
+	The sample clock is divided down from a fractional-N baseband PLL (40 MHz reference, fixed modulus, 715 to 1430 MHz)
+	and the driver truncates at each step, so some rates can't be hit exactly. 30.72 MS/s reads back as 30719999 Hz,
+	for example. This models the PLL with a power of two divider, which is enough to reproduce that.
+ */
+static int64_t ActualSampleRate(int64_t rate)
+{
+	const int64_t ref = 40000000;
+	const int64_t modulus = 2088960;
+
+	int64_t div = 2;
+	while(rate * div < 715000000)
+		div *= 2;
+
+	int64_t target = rate * div;
+	int64_t n = target / ref;
+	int64_t frac = (target - n*ref) * modulus / ref;
+	return (n*ref + frac*ref/modulus) / div;
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Construction / destruction
 
@@ -343,7 +365,7 @@ bool IIOMockContext::WriteAttr(
 					(it2.first.size() >= attr.size()) &&
 					(it2.first.compare(it2.first.size() - attr.size(), attr.size(), attr) == 0) )
 				{
-					it2.second.value = to_string(v);
+					it2.second.value = to_string(ActualSampleRate(v));
 				}
 			}
 			return true;
