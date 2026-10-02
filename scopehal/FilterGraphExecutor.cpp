@@ -616,7 +616,29 @@ void FilterGraphExecutor::DoExecutorThread(size_t i)
 
 		//Run the batch
 		double start = GetTime();
-		batch.Run(cmdbuf, queue);
+		try
+		{
+			batch.Run(cmdbuf, queue);
+		}
+		catch(const std::exception& e)
+		{
+			//Don't take down the whole application because one filter failed, the filters are still marked as
+			//complete below so the graph run doesn't hang
+			LogError("Runner %zu: exception while running filter graph batch: %s\n", i, e.what());
+		}
+
+		//Put the command buffer back in the initial state for the next batch, whatever this one did with it.
+		//A filter that returns early (e.g. because it has no input) after we called begin() for it leaves the
+		//buffer recording, and calling begin() on it again is invalid (AMD drivers fail with VK_ERROR_UNKNOWN).
+		//The buffer is never pending here since every submit blocks until it completes.
+		try
+		{
+			cmdbuf.reset();
+		}
+		catch(const std::exception& e)
+		{
+			LogError("Runner %zu: failed to reset command buffer: %s\n", i, e.what());
+		}
 		double dt = GetTime() - start;
 		int64_t fs = dt * FS_PER_SECOND;
 
