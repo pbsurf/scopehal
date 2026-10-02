@@ -176,6 +176,7 @@ set(SCOPEHAL_SOURCES
 	SCPIRFSignalGenerator.cpp
 	SCPISA.cpp
 	SCPISDR.cpp
+	SDRTransmitChannel.cpp
 	SCPISpectrometer.cpp
 	SCPIVNA.cpp
 	SocketCANAnalyzer.cpp

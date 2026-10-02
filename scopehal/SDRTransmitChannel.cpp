@@ -30,82 +30,49 @@
 /**
 	@file
 	@author ngscopeclient contributors
-	@brief Declaration of SDRTransmitChannel
+	@brief Implementation of SDRTransmitChannel
 	@ingroup sdrdrivers
  */
 
-#ifndef SDRTransmitChannel_h
-#define SDRTransmitChannel_h
+#include "scopehal.h"
+#include "SCPISDR.h"
 
-/**
-	@brief A transmit path of a software defined radio
+using namespace std;
 
-	This has no data streams, since the samples being transmitted come from the radio itself (for example a DDS core)
-	rather than from ngscopeclient. It exists so that the transmitter shows up in the instrument's channel list and can
-	be configured with the SCPISDR transmit control methods.
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Input processing
 
-	The first transmit path has an input for the transmit LO frequency, so it can be driven from the filter graph (for
-	example swept by a Scalar Stairstep filter). The LO is shared by all transmit paths, so the others don't.
-
-	@ingroup sdrdrivers
- */
-class SDRTransmitChannel : public InstrumentChannel
+bool SDRTransmitChannel::ValidateChannel(size_t i, StreamDescriptor stream)
 {
-public:
+	if( (stream.m_channel == nullptr) || (i != INPUT_LO) || (GetInputCount() == 0) )
+		return false;
 
-	///@brief Input indexes (only the first transmit path has inputs)
-	enum InputIndexes
-	{
-		INPUT_LO
-	};
+	return (stream.GetType() == Stream::STREAM_TYPE_ANALOG_SCALAR);
+}
 
-	/**
-		@brief Creates a transmit channel
+void SDRTransmitChannel::OnInputChanged(size_t /*i*/)
+{
+	//Send whatever the new input says, even if it's the same as the last one
+	m_lastLo = NAN;
+}
 
-		@param sdr		The radio this channel is part of
-		@param hwname	Internal hardware name of the channel
-		@param color	Display color
-		@param index	Position of this channel within m_channels of the parent instrument
-		@param txIndex	Zero-based index of this transmit path, as used by the SCPISDR transmit control methods
-	 */
-	SDRTransmitChannel(
-		Instrument* sdr,
-		const std::string& hwname,
-		const std::string& color,
-		size_t index,
-		size_t txIndex)
-		: InstrumentChannel(sdr, hwname, color, Unit(Unit::UNIT_HZ), index)
-		, m_txIndex(txIndex)
-		, m_lastLo(NAN)
-	{
-		ClearStreams();
+void SDRTransmitChannel::Refresh(vk::raii::CommandBuffer& /*cmdBuf*/, shared_ptr<QueueHandle> /*queue*/)
+{
+	if(GetInputCount() == 0)
+		return;
 
-		//Only the first transmit path has anything to connect to a filter graph
-		if(txIndex == 0)
-		{
-			CreateInput("LO");
-			m_visibilityMode = VIS_AUTO;
-		}
-		else
-			m_visibilityMode = VIS_HIDE;
-	}
+	auto loIn = GetInput(INPUT_LO);
+	if(!loIn || (loIn.GetYAxisUnits() != Unit(Unit::UNIT_HZ)))
+		return;
 
-	///@brief Gets the zero-based index of this path among the radio's transmit paths
-	size_t GetTxIndex() const
-	{ return m_txIndex; }
+	//We're refreshed every time the filter graph runs (every capture), so only retune when the input changes.
+	//Compare against what we last sent rather than what the radio reports, since the synthesizer may round it.
+	double lo = loIn.GetScalarValue();
+	if(lo == m_lastLo)
+		return;
+	m_lastLo = lo;
 
-	virtual PhysicalConnector GetPhysicalConnector() override
-	{ return InstrumentChannel::CONNECTOR_SMA; }
-
-	virtual bool ValidateChannel(size_t i, StreamDescriptor stream) override;
-	virtual void OnInputChanged(size_t i) override;
-	virtual void Refresh(vk::raii::CommandBuffer& cmdBuf, std::shared_ptr<QueueHandle> queue) override;
-
-protected:
-	size_t m_txIndex;
-
-	///@brief LO frequency last sent to the radio from our input (NaN if none since it was connected)
-	double m_lastLo;
-};
-
-#endif
+	auto sdr = dynamic_cast<SCPISDR*>(m_instrument);
+	if(sdr)
+		sdr->SetTxLOFrequency(llround(lo));
+}
