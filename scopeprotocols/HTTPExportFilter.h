@@ -39,6 +39,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -126,6 +127,7 @@ public:
 
 	void Configure(const std::string& host, uint16_t port, bool allowTrigger);
 	TriggerRequest TakeTriggerRequest();
+	void SetTriggerRequestCallback(std::function<void()> callback);
 
 	std::string GetBaseURL();
 	std::string GetError();
@@ -195,6 +197,9 @@ protected:
 
 	///@brief Acquisition requested by a client and not yet taken by the application (protected by m_entriesMutex)
 	TriggerRequest m_triggerRequest = TRIGGER_NONE;
+
+	///@brief Called by request handlers when a client requests an acquisition (protected by m_entriesMutex)
+	std::function<void()> m_triggerRequestCallback;
 
 	///@brief True if clients may request acquisitions (read by request handlers, so atomic)
 	std::atomic<bool> m_allowTrigger;

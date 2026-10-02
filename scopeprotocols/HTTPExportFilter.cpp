@@ -273,8 +273,8 @@ bool HTTPExportServer::IsWaveformWanted(const string& key)
 /**
 	@brief Gets and clears the acquisition requested by clients since the last call
 
-	Called by the application every frame. It decides what to do: nothing if the trigger is already running, since
-	the next acquisition will satisfy the clients anyway.
+	Called by the application on each pass of its main loop. It decides what to do: nothing if the trigger is already
+	running, since the next acquisition will satisfy the clients anyway.
  */
 HTTPExportServer::TriggerRequest HTTPExportServer::TakeTriggerRequest()
 {
@@ -282,6 +282,19 @@ HTTPExportServer::TriggerRequest HTTPExportServer::TakeTriggerRequest()
 	auto ret = m_triggerRequest;
 	m_triggerRequest = TRIGGER_NONE;
 	return ret;
+}
+
+/**
+	@brief Sets a function to call when a client requests an acquisition
+
+	The application uses this to wake up its main loop, which only calls TakeTriggerRequest() when it runs. The
+	callback is called from a request handler thread with an internal mutex held, so it must be quick and must not
+	call back into the server.
+ */
+void HTTPExportServer::SetTriggerRequestCallback(function<void()> callback)
+{
+	lock_guard<mutex> lock(m_entriesMutex);
+	m_triggerRequestCallback = callback;
 }
 
 /**
@@ -519,6 +532,8 @@ int HTTPExportServer::WaitForUpdate(
 	auto seq0 = it->second.m_seq;
 	if(trigger > m_triggerRequest)
 		m_triggerRequest = trigger;
+	if( (trigger != TRIGGER_NONE) && m_triggerRequestCallback)
+		m_triggerRequestCallback();
 
 	bool updatedInTime = m_entriesChanged.wait_for(
 		lock,
