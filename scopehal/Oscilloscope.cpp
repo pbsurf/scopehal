@@ -521,11 +521,12 @@ void Oscilloscope::DoLoadConfiguration(int version, const YAML::Node& node, IDTa
 			{
 				auto stype = chan->GetType(0);
 
-				//If the channel already has the right streams (it's part of a live instrument, whose driver knows
+				//If the channel already has the streams (it's part of a live instrument, whose driver knows
 				//what it has) leave them alone. We don't save the type of each stream, so rebuilding them would make
 				//everything the same type as the first one, which is wrong for something like the center frequency
-				//scalar of a complex channel.
-				bool rebuild = (chan->GetStreamCount() != nstreams);
+				//scalar of a complex channel. A newer driver may have added streams at the end since the file was
+				//saved, so having more than the file is fine too.
+				bool rebuild = (chan->GetStreamCount() < nstreams);
 				if(rebuild)
 					chan->ClearStreams();
 
