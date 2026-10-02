@@ -3,7 +3,7 @@
 	url = https://github.com/ngscopeclient/xptools.git
 [submodule "log"]
 	path = log
-	url = https://github.com/ngscopeclient/logtools.git
+	url = https://github.com/pbsurf/ngscopeclient-logtools.git
 [submodule "VkFFT"]
 	path = VkFFT
 	url = https://github.com/ngscopeclient/VkFFT.git
