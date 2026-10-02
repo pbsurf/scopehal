@@ -66,7 +66,8 @@ SpectrumStitchFilter::SpectrumStitchFilter(const string& color)
 	AddStream(Unit(Unit::UNIT_DBM), "data", Stream::STREAM_TYPE_ANALOG);
 	CreateInput<InputConstraintStreamType>("din", Stream::STREAM_TYPE_ANALOG);
 
-	//A little more than the LO step of IIOSDR, so adjacent captures overlap
+	//A little more than the default LO step of IIOSDR (80%), so adjacent captures overlap. Where they do, each bin comes
+	//from the closest capture, so only the middle half step either side of each LO gets used anyway.
 	m_usableBandwidth = FilterParameter(FilterParameter::TYPE_FLOAT, Unit(Unit::UNIT_PERCENT));
 	m_usableBandwidth.SetFloatVal(0.9);
 

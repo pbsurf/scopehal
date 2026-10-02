@@ -56,21 +56,27 @@ static const size_t g_maxTones = 2;
 //Full scale of the 12 bit ADC (sign extended into 16 bits by libiio)
 static const float g_adcScale = 1.0f / 2048;
 
-//When sweeping, how much of the capture bandwidth we step the LO by. The rest is overlap between adjacent captures,
-//so that the analog filter rolloff at the edges of each capture isn't used.
-static const double g_sweepStepFraction = 0.8;
+//When sweeping, how much of the capture bandwidth we step the LO by unless told otherwise. The rest is overlap between
+//adjacent captures, so that the analog filter rolloff at the edges of each capture isn't used.
+static const double g_defaultSweepStepFraction = 0.8;
+
+//Limits of the sweep step. Any bigger and there would be gaps between captures, any smaller and sweeps get very slow.
+static const double g_minSweepStepFraction = 0.1;
+static const double g_maxSweepStepFraction = 1.0;
 
 //How long to let the synthesizer settle after moving the LO during a sweep
 static const chrono::microseconds g_sweepSettleTime(1000);
 
 //Number of blocks the kernel can queue up while capturing. When not sweeping, more let the radio keep capturing while
 //we're busy (this is the libiio default). When sweeping, anything queued up before a retune would be at the old LO.
+//(Checked on a Pluto at 61.44 MSPS: with more than one while sweeping, captures come out a whole number of steps late.)
 static const size_t g_kernelBuffers = 4;
 static const size_t g_sweepKernelBuffers = 1;
 
 //How many blocks to throw away after a retune when sweeping. With one kernel buffer the radio only captures a block
 //once it's asked for, so nothing queued is from before the retune. (Checked on a Pluto by sweeping across a looped back
-//TX tone: no copies of it one LO step away. If they ever show up, set this to g_sweepKernelBuffers.)
+//TX tone: no copies of it one LO step away. Checked again with a test tone at 4K - 256K samples per block and
+//61.44 MSPS. If they ever show up, set this to g_sweepKernelBuffers.)
 static const size_t g_sweepDiscard = 0;
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -91,6 +97,7 @@ IIOSDR::IIOSDR(SCPITransport* transport)
 	, m_sampleRate(2500000)
 	, m_sampleDepth(65536)
 	, m_sweepEnabled(false)
+	, m_sweepStepFraction(g_defaultSweepStepFraction)
 	, m_centerFreqDirty(false)
 	, m_spanDirty(false)
 	, m_sampleRateDirty(false)
@@ -107,6 +114,7 @@ IIOSDR::IIOSDR(SCPITransport* transport)
 	, m_hwCenterFreq(m_centerFreq)
 	, m_hwSampleRate(m_sampleRate)
 	, m_sweepStep(0)
+	, m_sweepStartTime(0)
 	, m_sweepRestart(true)
 	, m_flushCapture(false)
 {
@@ -1130,6 +1138,30 @@ void IIOSDR::SetSweepEnabled(bool enable)
 }
 
 /**
+	@brief Gets how far apart the LO steps of a sweep are, as a fraction of the capture bandwidth
+ */
+double IIOSDR::GetSweepStepFraction()
+{
+	lock_guard<recursive_mutex> lock(m_cacheMutex);
+	return m_sweepStepFraction;
+}
+
+/**
+	@brief Sets how far apart the LO steps of a sweep are, as a fraction of the capture bandwidth
+
+	Smaller steps mean more overlap between adjacent captures, so less of the edges of each one (where the analog
+	filter rolls off and ADC noise isn't fully filtered out) is used, at the cost of more steps per sweep. A sweep in
+	progress starts over with the new steps.
+
+	@param fraction	Step as a fraction of the capture bandwidth, clamped to 0.1 - 1
+ */
+void IIOSDR::SetSweepStepFraction(double fraction)
+{
+	lock_guard<recursive_mutex> lock(m_cacheMutex);
+	m_sweepStepFraction = min(max(fraction, g_minSweepStepFraction), g_maxSweepStepFraction);
+}
+
+/**
 	@brief Gets the width of the spectrum we can capture at once at a given sample rate
 
 	@param rate	Sample rate in Hz
@@ -1162,11 +1194,12 @@ bool IIOSDR::IsSweeping(bool enabled, int64_t span, uint64_t rate)
 	@param span		Width of the span in Hz
 	@param rate		Sample rate in Hz
 	@param depth	Number of samples per capture
+	@param fraction	Step as a fraction of the capture bandwidth
  */
-vector<int64_t> IIOSDR::GetSweepFrequencies(int64_t center, int64_t span, uint64_t rate, size_t depth)
+vector<int64_t> IIOSDR::GetSweepFrequencies(int64_t center, int64_t span, uint64_t rate, size_t depth, double fraction)
 {
 	double bin = static_cast<double>(rate) / depth;
-	double step = max(1.0, floor(GetCaptureBandwidth(rate) * g_sweepStepFraction / bin)) * bin;
+	double step = max(1.0, floor(GetCaptureBandwidth(rate) * fraction / bin)) * bin;
 	size_t n = ceil(span / step);
 
 	//Steps past the end of the tuning range all end up at the end, so skip duplicates
@@ -1307,12 +1340,14 @@ bool IIOSDR::AcquireData()
 	vector<string> iioChannels;
 	size_t depth;
 	bool sweepEnabled;
+	double sweepStepFraction;
 	int64_t span;
 	int64_t center;
 	{
 		lock_guard<recursive_mutex> lock(m_cacheMutex);
 		depth = m_sampleDepth;
 		sweepEnabled = m_sweepEnabled;
+		sweepStepFraction = m_sweepStepFraction;
 		span = m_span;
 		center = m_centerFreq;
 		for(size_t i=0; i<m_numRx; i++)
@@ -1335,12 +1370,14 @@ bool IIOSDR::AcquireData()
 	bool flush = m_flushCapture.exchange(false);
 	if(sweeping)
 	{
-		auto freqs = GetSweepFrequencies(center, span, m_hwSampleRate, depth);
+		auto freqs = GetSweepFrequencies(center, span, m_hwSampleRate, depth, sweepStepFraction);
 		if(m_sweepRestart.exchange(false) || (freqs != m_sweepFreqs) || (m_sweepStep >= freqs.size()) )
 		{
 			m_sweepFreqs = freqs;
 			m_sweepStep = 0;
 		}
+		if(m_sweepStep == 0)
+			m_sweepStartTime = GetTime();
 
 		int64_t lo = m_sweepFreqs[m_sweepStep];
 		m_sweepStep ++;
@@ -1376,6 +1413,7 @@ bool IIOSDR::AcquireData()
 	}
 
 	SequenceSet s;
+	vector<PendingScalars> scalars;
 	for(size_t n=0; n<paths.size(); n++)
 	{
 		size_t i = paths[n];
@@ -1411,9 +1449,6 @@ bool IIOSDR::AcquireData()
 		s[StreamDescriptor(GetChannel(i), 0)] = icap;
 		s[StreamDescriptor(GetChannel(i), 1)] = qcap;
 
-		auto chan = dynamic_cast<ComplexChannel*>(GetChannel(i));
-		chan->UpdateCenterFrequency(centerFreq);
-
 		//Read after the capture so it's for the same LO (this is a round trip to the radio, so only if asked for)
 		//The AD9361 RSSI is 0 to -128 dB, referenced to the chip's input with the receive gain taken out (UG-570,
 		//"RSSI Symbol"), but the Linux driver prints the register with %u so the sign is lost. Put it back.
@@ -1425,12 +1460,20 @@ bool IIOSDR::AcquireData()
 			else
 				rssi = NAN;
 		}
-		chan->SetScalarValue(m_rssiStream, rssi);
+		scalars.push_back({i, centerFreq, rssi});
 	}
 
-	//Save the waveforms to our queue
+	if(sweeping && sweepDone)
+	{
+		double dt = (GetTime() - m_sweepStartTime) * 1000;
+		LogDebug("IIO SDR: sweep of %zu steps took %.1f ms (%.2f ms per step)\n",
+			m_sweepFreqs.size(), dt, dt / m_sweepFreqs.size());
+	}
+
+	//Save the waveforms to our queue, along with the center frequency and RSSI that go with them
 	m_pendingWaveformsMutex.lock();
 	m_pendingWaveforms.push_back(s);
+	m_pendingScalars.push_back(scalars);
 	m_pendingWaveformsMutex.unlock();
 
 	//If this was a one-shot trigger we're no longer armed (once we've been all the way across the sweep)
@@ -1438,6 +1481,52 @@ bool IIOSDR::AcquireData()
 		m_triggerArmed = false;
 
 	return true;
+}
+
+/**
+	@brief Pops the oldest set of waveforms, and puts the center frequency and RSSI they were captured with on the
+	channels
+ */
+bool IIOSDR::PopPendingWaveform()
+{
+	lock_guard<mutex> lock(m_pendingWaveformsMutex);
+	if(m_pendingWaveforms.empty())
+		return false;
+
+	for(auto it : m_pendingWaveforms.front())
+		it.first.m_channel->SetData(it.second, it.first.m_stream);
+	m_pendingWaveforms.pop_front();
+
+	if(!m_pendingScalars.empty())
+	{
+		for(auto& p : m_pendingScalars.front())
+		{
+			auto chan = dynamic_cast<ComplexChannel*>(GetChannel(p.m_channel));
+			chan->UpdateCenterFrequency(p.m_center);
+			chan->SetScalarValue(m_rssiStream, p.m_rssi);
+		}
+		m_pendingScalars.pop_front();
+	}
+
+	m_downloadClock.Tick();
+	return true;
+}
+
+/**
+	@brief Throws away all pending waveforms, along with their center frequency and RSSI
+
+	(both at once, so a capture queued in the meantime can't end up with the wrong values)
+ */
+void IIOSDR::ClearPendingWaveforms()
+{
+	lock_guard<mutex> lock(m_pendingWaveformsMutex);
+	for(auto& set : m_pendingWaveforms)
+	{
+		for(auto& it : set)
+			delete it.second;
+	}
+	m_pendingWaveforms.clear();
+	m_pendingScalars.clear();
 }
 
 #endif

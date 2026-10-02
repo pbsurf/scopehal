@@ -55,9 +55,9 @@
 
 	If sweeping is enabled and the span is wider than can be captured in one go (the smaller of the sample rate and
 	the widest analog bandwidth), the radio sweeps: each acquisition steps the RX LO to the next frequency across the span, and reports
-	it as the center frequency of that capture. The steps are a fraction of the capture bandwidth apart, so the edges
-	of each capture (where the analog filter rolls off) overlap the next one, and are a whole number of FFT bins so
-	the spectra line up. Use the Spectrum Stitch filter on the output of a Complex FFT to put the pieces together.
+	it as the center frequency of that capture. The steps are a fraction of the capture bandwidth apart (80% unless
+	changed with SetSweepStepFraction()), so the edges of each capture (where the analog filter rolls off) overlap the
+	next one, and are a whole number of FFT bins so the spectra line up. Use the Spectrum Stitch filter on the output of a Complex FFT to put the pieces together.
 	In single trigger mode, the radio stays armed until it has been through the whole sweep. With sweeping disabled,
 	the span is limited to the widest analog bandwidth.
 
@@ -81,6 +81,10 @@ public:
 public:
 
 	virtual void BackgroundProcessing() override;
+
+	//Waveform access
+	virtual bool PopPendingWaveform() override;
+	virtual void ClearPendingWaveforms() override;
 
 	//Channel configuration
 	virtual bool IsChannelEnabled(size_t i) override;
@@ -108,6 +112,8 @@ public:
 	virtual bool CanSweep() override;
 	virtual bool IsSweepEnabled() override;
 	virtual void SetSweepEnabled(bool enable) override;
+	double GetSweepStepFraction();
+	void SetSweepStepFraction(double fraction);
 
 	//RX gain
 	virtual bool HasGainControl(size_t i) override;
@@ -193,7 +199,7 @@ protected:
 	std::string GetToneChannelName(size_t tx, size_t tone, bool q);
 	int64_t GetCaptureBandwidth(uint64_t rate);
 	bool IsSweeping(bool enabled, int64_t span, uint64_t rate);
-	std::vector<int64_t> GetSweepFrequencies(int64_t center, int64_t span, uint64_t rate, size_t depth);
+	std::vector<int64_t> GetSweepFrequencies(int64_t center, int64_t span, uint64_t rate, size_t depth, double fraction);
 	void Retune(int64_t freq);
 
 	///@brief The IIO context (owned by the transport), or nullptr if we failed to find a supported device
@@ -214,6 +220,7 @@ protected:
 	std::vector<bool> m_gainModeDirty;
 	std::vector<bool> m_rssiEnabled;
 	bool m_sweepEnabled;
+	double m_sweepStepFraction;
 	bool m_centerFreqDirty;
 	bool m_spanDirty;
 	bool m_sampleRateDirty;
@@ -267,11 +274,31 @@ protected:
 	///@brief Index into m_sweepFreqs of the next capture. Only touched by the instrument thread.
 	size_t m_sweepStep;
 
+	///@brief When the sweep in progress started (for timing it). Only touched by the instrument thread.
+	double m_sweepStartTime;
+
 	///@brief Set when the trigger is armed, to start the next capture at the beginning of the sweep
 	std::atomic<bool> m_sweepRestart;
 
 	///@brief Set when samples already queued in the capture buffer are out of date and have to be thrown away
 	std::atomic<bool> m_flushCapture;
+
+	///@brief Scalar values of a receive path for one capture
+	struct PendingScalars
+	{
+		size_t m_channel;
+		int64_t m_center;
+		double m_rssi;
+	};
+
+	/**
+		@brief Center frequency and RSSI of each receive path, for each set of waveforms in m_pendingWaveforms
+
+		In the same order as m_pendingWaveforms, and protected by m_pendingWaveformsMutex. These are put on the
+		channels when the waveforms are popped rather than when they're captured, since the filter graph may still be
+		working through earlier waveforms (captured at a different LO while sweeping).
+	 */
+	std::list<std::vector<PendingScalars> > m_pendingScalars;
 
 public:
 	static std::string GetDriverNameInternal();

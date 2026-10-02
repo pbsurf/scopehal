@@ -65,7 +65,7 @@ public:
 		AddStream(Unit(Unit::UNIT_HZ), "center", Stream::STREAM_TYPE_ANALOG_SCALAR);
 	}
 
-	void UpdateCenterFrequency(float freq)
+	void UpdateCenterFrequency(double freq)
 	{ m_streams[2].m_value = freq; }
 
 	/**

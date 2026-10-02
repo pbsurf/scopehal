@@ -911,7 +911,7 @@ public:
 	// Waveform Access
 
 	bool HasPendingWaveforms();
-	void ClearPendingWaveforms();
+	virtual void ClearPendingWaveforms();
 	size_t GetPendingWaveformCount();
 	virtual bool PopPendingWaveform();
 	virtual bool IsAppendingToWaveform();
