@@ -90,6 +90,7 @@ IIOSDR::IIOSDR(SCPITransport* transport)
 	, m_span(2000000)
 	, m_sampleRate(2500000)
 	, m_sampleDepth(65536)
+	, m_sweepEnabled(false)
 	, m_centerFreqDirty(false)
 	, m_spanDirty(false)
 	, m_sampleRateDirty(false)
@@ -560,7 +561,7 @@ void IIOSDR::ApplyConfiguration()
 
 		//Changing the sample rate can start or stop a sweep, and when sweeping the analog bandwidth follows it.
 		//The LO is moved around by AcquireData() while sweeping, so has to go back to the center when we stop.
-		sweep = IsSweeping(span, rate);
+		sweep = IsSweeping(m_sweepEnabled, span, rate);
 		doSpan |= doRate;
 		if(!sweep)
 			doFreq |= doSpan;
@@ -1064,10 +1065,34 @@ vector<uint64_t> IIOSDR::GetSampleDepthsNonInterleaved()
 
 void IIOSDR::SetSpan(int64_t span)
 {
-	//Anything wider than we can capture at once is swept, up to the whole tuning range
+	//When sweeping, anything wider than we can capture at once is swept, up to the whole tuning range
 	lock_guard<recursive_mutex> lock(m_cacheMutex);
-	int64_t maxSpan = m_limits.maxCenterFreq - m_limits.minCenterFreq + m_limits.maxBandwidth;
+	int64_t maxSpan = m_limits.maxBandwidth;
+	if(m_sweepEnabled)
+		maxSpan = m_limits.maxCenterFreq - m_limits.minCenterFreq + m_limits.maxBandwidth;
 	m_span = min(max(span, m_limits.minBandwidth), maxSpan);
+	m_spanDirty = true;
+}
+
+bool IIOSDR::CanSweep()
+{
+	return true;
+}
+
+bool IIOSDR::IsSweepEnabled()
+{
+	lock_guard<recursive_mutex> lock(m_cacheMutex);
+	return m_sweepEnabled;
+}
+
+void IIOSDR::SetSweepEnabled(bool enable)
+{
+	//Turning sweeping off cuts the span down to what we can capture at once. Either way, mark the span dirty so
+	//ApplyConfiguration() works out whether we're sweeping now (and puts the LO back in the center if not).
+	lock_guard<recursive_mutex> lock(m_cacheMutex);
+	m_sweepEnabled = enable;
+	if(!enable)
+		m_span = min(m_span, m_limits.maxBandwidth);
 	m_spanDirty = true;
 }
 
@@ -1082,14 +1107,16 @@ int64_t IIOSDR::GetCaptureBandwidth(uint64_t rate)
 }
 
 /**
-	@brief Checks if a span is too wide to capture at once, so we have to sweep the LO across it
+	@brief Checks if we have to sweep the LO across a span, because sweeping is enabled and it's too wide to capture
+	at once
 
-	@param span	Span in Hz
-	@param rate	Sample rate in Hz
+	@param enabled	True if sweeping is enabled
+	@param span		Span in Hz
+	@param rate		Sample rate in Hz
  */
-bool IIOSDR::IsSweeping(int64_t span, uint64_t rate)
+bool IIOSDR::IsSweeping(bool enabled, int64_t span, uint64_t rate)
 {
-	return span > GetCaptureBandwidth(rate);
+	return enabled && (span > GetCaptureBandwidth(rate));
 }
 
 /**
@@ -1245,11 +1272,13 @@ bool IIOSDR::AcquireData()
 	vector<size_t> paths;
 	vector<string> iioChannels;
 	size_t depth;
+	bool sweepEnabled;
 	int64_t span;
 	int64_t center;
 	{
 		lock_guard<recursive_mutex> lock(m_cacheMutex);
 		depth = m_sampleDepth;
+		sweepEnabled = m_sweepEnabled;
 		span = m_span;
 		center = m_centerFreq;
 		for(size_t i=0; i<m_numRx; i++)
@@ -1267,7 +1296,7 @@ bool IIOSDR::AcquireData()
 	//If the span is too wide to capture at once, move on to the next step of the sweep.
 	//Start over at the beginning if the sweep finished, or if the user changed it.
 	bool sweepDone = true;
-	bool sweeping = IsSweeping(span, m_hwSampleRate);
+	bool sweeping = IsSweeping(sweepEnabled, span, m_hwSampleRate);
 	bool flush = m_flushCapture.exchange(false);
 	if(sweeping)
 	{

@@ -53,12 +53,13 @@
 	with a capture that is in progress. The values reported by the getters are the requested settings, clamped to the
 	limits we know about, until the hardware has been updated and read back.
 
-	If the span is wider than can be captured in one go (the smaller of the sample rate and the widest analog
-	bandwidth), the radio sweeps: each acquisition steps the RX LO to the next frequency across the span, and reports
+	If sweeping is enabled and the span is wider than can be captured in one go (the smaller of the sample rate and
+	the widest analog bandwidth), the radio sweeps: each acquisition steps the RX LO to the next frequency across the span, and reports
 	it as the center frequency of that capture. The steps are a fraction of the capture bandwidth apart, so the edges
 	of each capture (where the analog filter rolls off) overlap the next one, and are a whole number of FFT bins so
 	the spectra line up. Use the Spectrum Stitch filter on the output of a Complex FFT to put the pieces together.
-	In single trigger mode, the radio stays armed until it has been through the whole sweep.
+	In single trigger mode, the radio stays armed until it has been through the whole sweep. With sweeping disabled,
+	the span is limited to the widest analog bandwidth.
 
 	The capture buffer is kept open while the trigger is armed, since setting one up takes much longer than a capture.
 	Samples queued in it from before a settings change are thrown away. While sweeping, the radio only gets one
@@ -102,6 +103,11 @@ public:
 	virtual int64_t GetSpan() override;
 	virtual void SetCenterFrequency(size_t channel, int64_t freq) override;
 	virtual int64_t GetCenterFrequency(size_t channel) override;
+
+	//Sweeping
+	virtual bool CanSweep() override;
+	virtual bool IsSweepEnabled() override;
+	virtual void SetSweepEnabled(bool enable) override;
 
 	//RX gain
 	virtual bool HasGainControl(size_t i) override;
@@ -181,7 +187,7 @@ protected:
 	void WriteTone(size_t tx, size_t tone, const TxTone& in);
 	std::string GetToneChannelName(size_t tx, size_t tone, bool q);
 	int64_t GetCaptureBandwidth(uint64_t rate);
-	bool IsSweeping(int64_t span, uint64_t rate);
+	bool IsSweeping(bool enabled, int64_t span, uint64_t rate);
 	std::vector<int64_t> GetSweepFrequencies(int64_t center, int64_t span, uint64_t rate, size_t depth);
 	void Retune(int64_t freq);
 
@@ -201,6 +207,7 @@ protected:
 	std::vector<std::string> m_gainMode;
 	std::vector<bool> m_gainDirty;
 	std::vector<bool> m_gainModeDirty;
+	bool m_sweepEnabled;
 	bool m_centerFreqDirty;
 	bool m_spanDirty;
 	bool m_sampleRateDirty;

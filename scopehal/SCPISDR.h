@@ -121,6 +121,26 @@ public:
 	virtual void SetGain(size_t i, float gain);
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+	// Sweeping
+	//
+	// Drivers for radios that can sweep their LO across a span wider than one capture override these. The defaults
+	// describe a radio that can't.
+
+	///@brief Returns true if the radio can sweep spans wider than it can capture at once
+	virtual bool CanSweep();
+
+	/**
+		@brief Returns true if sweeping is enabled
+
+		When it is, spans wider than one capture are swept. When it isn't, the span is limited to what can be
+		captured at once.
+	 */
+	virtual bool IsSweepEnabled();
+
+	///@brief Enables or disables sweeping
+	virtual void SetSweepEnabled(bool enable);
+
+	////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 	// Transmit control
 	//
 	// Drivers for radios that can transmit override these. The defaults describe a receive-only radio.

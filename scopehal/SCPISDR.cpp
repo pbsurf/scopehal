@@ -283,6 +283,24 @@ void SCPISDR::SetGain(size_t /*i*/, float /*gain*/)
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Sweeping (default is no sweep support)
+
+bool SCPISDR::CanSweep()
+{
+	return false;
+}
+
+bool SCPISDR::IsSweepEnabled()
+{
+	return false;
+}
+
+void SCPISDR::SetSweepEnabled(bool /*enable*/)
+{
+	//no-op
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Transmit control (default is no transmitter)
 
 size_t SCPISDR::GetTxChannelCount()
@@ -358,6 +376,9 @@ void SCPISDR::SetTxToneAmplitude(size_t /*tx*/, size_t /*tone*/, float /*amplitu
 //cppcheck-suppress duplInheritedMember
 void SCPISDR::DoSerializeConfiguration(YAML::Node& node, IDTable& /*table*/)
 {
+	if(CanSweep())
+		node["sweep"] = IsSweepEnabled();
+
 	//Transmitter (not tied to channel nodes since transmit paths aren't oscilloscope channels)
 	size_t ntx = GetTxChannelCount();
 	if(ntx > 0)
@@ -400,7 +421,10 @@ void SCPISDR::DoSerializeConfiguration(YAML::Node& node, IDTable& /*table*/)
 //cppcheck-suppress duplInheritedMember
 void SCPISDR::DoLoadConfiguration(int /*version*/, const YAML::Node& node, IDTable& /*idmap*/)
 {
-	//Oscilloscope saves the span, but doesn't restore it
+	//Sweeping limits the span, so it has to be set first. Oscilloscope has already set the span, but it may have been
+	//cut down to one capture if sweeping wasn't enabled yet, so set it again.
+	if(CanSweep() && node["sweep"])
+		SetSweepEnabled(node["sweep"].as<bool>());
 	if(HasFrequencyControls() && node["span"])
 		SetSpan(node["span"].as<int64_t>());
 
