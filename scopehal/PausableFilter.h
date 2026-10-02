@@ -62,7 +62,18 @@ public:
 	virtual void Single();
 	virtual void Stop();
 
+	/**
+		@brief Emitted from the destructor of every pausable filter
+
+		Anything keeping raw pointers to pausable filters (such as trigger groups) can connect to this to drop them,
+		since a filter can be deleted by whoever releases the last reference to it.
+	 */
+	static sigc::signal<void(PausableFilter*)>& signal_destroyed()
+	{ return m_destroyedSignal; }
+
 protected:
+	static sigc::signal<void(PausableFilter*)> m_destroyedSignal;
+
 	bool m_running;
 	bool m_oneShot;
 };

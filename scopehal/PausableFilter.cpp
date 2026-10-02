@@ -49,8 +49,11 @@ PausableFilter::PausableFilter(const string& color, Category cat, Unit xunit)
 {
 }
 
+sigc::signal<void(PausableFilter*)> PausableFilter::m_destroyedSignal;
+
 PausableFilter::~PausableFilter()
 {
+	m_destroyedSignal.emit(this);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
