@@ -835,6 +835,24 @@ string Unit::PrettyPrintTabular(double value, int leftdigits, int rightdigits) c
  */
 string Unit::PrettyPrintInt64(int64_t value, int sigfigs, bool useDisplayLocale) const
 {
+	return PrettyPrintInt64WithScale(value, value, sigfigs, useDisplayLocale);
+}
+
+/**
+	@brief Prints a value with the SI scaling factor that would be used for a different value
+
+	This is for printing several values with the same prefix, such as the labels on an axis, so that for example zero
+	is shown as "0 μs" rather than "0 fs" next to "1 μs".
+
+	@param value				The value
+	@param scaleReference		Value used to choose the scaling factor (typically the largest magnitude of the set
+								of values being printed; a smaller magnitude than value may overflow)
+	@param sigfigs				Number of significant digits to display
+	@param useDisplayLocale		True if the string is formatted for display (user's locale)
+								False if the string is formatted for serialization ("C" locale regardless of user pref)
+ */
+string Unit::PrettyPrintInt64WithScale(int64_t value, int64_t scaleReference, int sigfigs, bool useDisplayLocale) const
+{
 	if(useDisplayLocale)
 		SetPrintingLocale();
 
@@ -843,8 +861,8 @@ string Unit::PrettyPrintInt64(int64_t value, int sigfigs, bool useDisplayLocale)
 	string prefix;
 	string numprefix;
 	string suffix;
-	GetSIScalingFactor(value, scaleFactor, prefix);
-	GetUnitSuffix(m_type, value, scaleFactor, prefix, numprefix, suffix);
+	GetSIScalingFactor(scaleReference, scaleFactor, prefix);
+	GetUnitSuffix(m_type, scaleReference, scaleFactor, prefix, numprefix, suffix);
 
 	//Apply the rescaling in the integer domain
 	int64_t mulFactor = scaleFactor;

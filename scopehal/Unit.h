@@ -124,6 +124,8 @@ public:
 	std::string PrettyPrint(double value, int sigfigs = -1, bool useDisplayLocale = true) const;
 	std::string PrettyPrintTabular(double value, int leftdigits = 4, int rightdigits = 3) const;
 	std::string PrettyPrintInt64(int64_t value, int sigfigs = -1, bool useDisplayLocale = true) const;
+	std::string PrettyPrintInt64WithScale(
+		int64_t value, int64_t scaleReference, int sigfigs = -1, bool useDisplayLocale = true) const;
 	std::string PrettyPrintInt64WithResolution(int64_t value, double resolution, bool useDisplayLocale = true) const;
 
 	std::string PrettyPrintRange(double pixelMin, double pixelMax, double rangeMin, double rangeMax) const;
