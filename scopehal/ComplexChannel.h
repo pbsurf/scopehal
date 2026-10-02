@@ -68,6 +68,20 @@ public:
 	void UpdateCenterFrequency(float freq)
 	{ m_streams[2].m_value = freq; }
 
+	/**
+		@brief Adds a scalar output for the received signal strength, for radios that can measure it
+
+		It's marked as infrequently used so it isn't added to the measurements automatically, since radios may only
+		read it on request.
+
+		@return Index of the new stream
+	 */
+	size_t AddRSSIStream()
+	{
+		return AddStream(
+			Unit(Unit::UNIT_DB), "rssi", Stream::STREAM_TYPE_ANALOG_SCALAR, Stream::STREAM_INFREQUENTLY_USED);
+	}
+
 	//assume this is a SDR with I/Q input for now
 	virtual PhysicalConnector GetPhysicalConnector() override
 	{ return ComplexChannel::CONNECTOR_SMA; }

@@ -121,6 +121,23 @@ public:
 	virtual void SetGain(size_t i, float gain);
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+	// Received signal strength
+	//
+	// Drivers for radios that can measure RSSI override these. The defaults describe a radio that can't.
+	//
+	// Reading the RSSI can take a round trip to the radio, so it's only read while enabled. When it is, the driver
+	// updates the "rssi" scalar stream of the channel on every acquisition. When it isn't, the stream is NaN.
+
+	///@brief Returns true if the radio can measure the received signal strength of channel i
+	virtual bool HasRSSI(size_t i);
+
+	///@brief Returns true if the RSSI of channel i is read on every acquisition
+	virtual bool IsRSSIEnabled(size_t i);
+
+	///@brief Enables or disables reading the RSSI of channel i on every acquisition
+	virtual void SetRSSIEnabled(size_t i, bool enable);
+
+	////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 	// Sweeping
 	//
 	// Drivers for radios that can sweep their LO across a span wider than one capture override these. The defaults

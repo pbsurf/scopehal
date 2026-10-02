@@ -103,6 +103,7 @@ IIOSDR::IIOSDR(SCPITransport* transport)
 	, m_txLoMin(70000000)
 	, m_txLoMax(6000000000)
 	, m_txMaxToneFreq(0)
+	, m_rssiStream(0)
 	, m_hwCenterFreq(m_centerFreq)
 	, m_hwSampleRate(m_sampleRate)
 	, m_sweepStep(0)
@@ -150,6 +151,11 @@ IIOSDR::IIOSDR(SCPITransport* transport)
 		SetChannelOffset(i, 1, 0);
 		SetChannelVoltageRange(i, 0, 2);
 		SetChannelVoltageRange(i, 1, 2);
+
+		//RSSI is only read on request, so there's nothing to show until then
+		m_rssiStream = chan->AddRSSIStream();
+		chan->SetScalarValue(m_rssiStream, NAN);
+		m_hasRSSI.push_back(m_ctx->HasChannelAttr(g_phyDevice, "voltage" + to_string(i), false, "rssi"));
 	}
 
 	//Only the first channel is enabled by default
@@ -161,6 +167,7 @@ IIOSDR::IIOSDR(SCPITransport* transport)
 	m_gainMode.resize(m_numRx);
 	m_gainDirty.resize(m_numRx, false);
 	m_gainModeDirty.resize(m_numRx, false);
+	m_rssiEnabled.resize(m_numRx, false);
 
 	DetectLimits();
 	DetectTransmitter();
@@ -892,6 +899,32 @@ void IIOSDR::SetGain(size_t i, float gain)
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Received signal strength
+
+bool IIOSDR::HasRSSI(size_t i)
+{
+	return m_ctx && (i < m_hasRSSI.size()) && m_hasRSSI[i];
+}
+
+bool IIOSDR::IsRSSIEnabled(size_t i)
+{
+	if(!HasRSSI(i))
+		return false;
+
+	lock_guard<recursive_mutex> lock(m_cacheMutex);
+	return m_rssiEnabled[i];
+}
+
+void IIOSDR::SetRSSIEnabled(size_t i, bool enable)
+{
+	if(!HasRSSI(i))
+		return;
+
+	lock_guard<recursive_mutex> lock(m_cacheMutex);
+	m_rssiEnabled[i] = enable;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Transmit control
 
 size_t IIOSDR::GetTxChannelCount()
@@ -1270,6 +1303,7 @@ bool IIOSDR::AcquireData()
 
 	//Snapshot what we're capturing. Channels come in I/Q pairs (voltage0 = RX1 I, voltage1 = RX1 Q, ...)
 	vector<size_t> paths;
+	vector<bool> readRSSI;
 	vector<string> iioChannels;
 	size_t depth;
 	bool sweepEnabled;
@@ -1286,6 +1320,7 @@ bool IIOSDR::AcquireData()
 			if(!m_channelEnabled[i])
 				continue;
 			paths.push_back(i);
+			readRSSI.push_back(m_rssiEnabled[i]);
 			iioChannels.push_back("voltage" + to_string(i*2));
 			iioChannels.push_back("voltage" + to_string(i*2 + 1));
 		}
@@ -1376,7 +1411,21 @@ bool IIOSDR::AcquireData()
 		s[StreamDescriptor(GetChannel(i), 0)] = icap;
 		s[StreamDescriptor(GetChannel(i), 1)] = qcap;
 
-		dynamic_cast<ComplexChannel*>(GetChannel(i))->UpdateCenterFrequency(centerFreq);
+		auto chan = dynamic_cast<ComplexChannel*>(GetChannel(i));
+		chan->UpdateCenterFrequency(centerFreq);
+
+		//Read after the capture so it's for the same LO (this is a round trip to the radio, so only if asked for)
+		//The AD9361 RSSI is 0 to -128 dB, referenced to the chip's input with the receive gain taken out (UG-570,
+		//"RSSI Symbol"), but the Linux driver prints the register with %u so the sign is lost. Put it back.
+		double rssi = NAN;
+		if(readRSSI[n])
+		{
+			if(m_ctx->ReadChannelAttrDouble(g_phyDevice, "voltage" + to_string(i), false, "rssi", rssi))
+				rssi = -rssi;
+			else
+				rssi = NAN;
+		}
+		chan->SetScalarValue(m_rssiStream, rssi);
 	}
 
 	//Save the waveforms to our queue

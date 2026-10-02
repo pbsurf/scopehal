@@ -119,6 +119,11 @@ public:
 	virtual float GetGain(size_t i) override;
 	virtual void SetGain(size_t i, float gain) override;
 
+	//Received signal strength
+	virtual bool HasRSSI(size_t i) override;
+	virtual bool IsRSSIEnabled(size_t i) override;
+	virtual void SetRSSIEnabled(size_t i, bool enable) override;
+
 	//Transmit control
 	virtual size_t GetTxChannelCount() override;
 	virtual size_t GetTxToneCount(size_t tx) override;
@@ -207,6 +212,7 @@ protected:
 	std::vector<std::string> m_gainMode;
 	std::vector<bool> m_gainDirty;
 	std::vector<bool> m_gainModeDirty;
+	std::vector<bool> m_rssiEnabled;
 	bool m_sweepEnabled;
 	bool m_centerFreqDirty;
 	bool m_spanDirty;
@@ -241,6 +247,12 @@ protected:
 
 	///@brief Supported gain control modes (same for all channels)
 	std::vector<std::string> m_gainModes;
+
+	///@brief True for each receive path that has an RSSI attribute. Set at startup and never changes.
+	std::vector<bool> m_hasRSSI;
+
+	///@brief Index of the RSSI stream in each receive channel
+	size_t m_rssiStream;
 
 	///@brief Limits of the radio. Set at startup and never changes.
 	Limits m_limits;

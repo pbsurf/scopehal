@@ -283,6 +283,24 @@ void SCPISDR::SetGain(size_t /*i*/, float /*gain*/)
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Received signal strength (default is no RSSI)
+
+bool SCPISDR::HasRSSI(size_t /*i*/)
+{
+	return false;
+}
+
+bool SCPISDR::IsRSSIEnabled(size_t /*i*/)
+{
+	return false;
+}
+
+void SCPISDR::SetRSSIEnabled(size_t /*i*/, bool /*enable*/)
+{
+	//no-op
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Sweeping (default is no sweep support)
 
 bool SCPISDR::CanSweep()
@@ -405,15 +423,22 @@ void SCPISDR::DoSerializeConfiguration(YAML::Node& node, IDTable& /*table*/)
 	YAML::Node channels = node["channels"];
 	for(size_t i=0; i<GetChannelCount(); i++)
 	{
-		if(!HasGainControl(i))
+		bool hasGain = HasGainControl(i);
+		bool hasRSSI = HasRSSI(i);
+		if(!hasGain && !hasRSSI)
 			continue;
 
 		YAML::Node channelNode = channels["ch" + to_string(i)];
 		channelNode["index"] = i;
-		auto mode = GetGainMode(i);
-		if(!mode.empty())
-			channelNode["gainmode"] = mode;
-		channelNode["gain"] = GetGain(i);
+		if(hasGain)
+		{
+			auto mode = GetGainMode(i);
+			if(!mode.empty())
+				channelNode["gainmode"] = mode;
+			channelNode["gain"] = GetGain(i);
+		}
+		if(hasRSSI)
+			channelNode["rssi"] = IsRSSIEnabled(i);
 	}
 }
 
@@ -469,14 +494,20 @@ void SCPISDR::DoLoadConfiguration(int /*version*/, const YAML::Node& node, IDTab
 		if(!cnode["index"])
 			continue;
 		size_t i = cnode["index"].as<size_t>();
-		if(i >= GetChannelCount() || !HasGainControl(i))
+		if(i >= GetChannelCount())
 			continue;
 
-		//Mode first, since the gain may only be settable in manual mode
-		if(cnode["gainmode"])
-			SetGainMode(i, cnode["gainmode"].as<string>());
-		if(cnode["gain"])
-			SetGain(i, cnode["gain"].as<float>());
+		if(HasGainControl(i))
+		{
+			//Mode first, since the gain may only be settable in manual mode
+			if(cnode["gainmode"])
+				SetGainMode(i, cnode["gainmode"].as<string>());
+			if(cnode["gain"])
+				SetGain(i, cnode["gain"].as<float>());
+		}
+
+		if(HasRSSI(i) && cnode["rssi"])
+			SetRSSIEnabled(i, cnode["rssi"].as<bool>());
 	}
 }
 
