@@ -169,7 +169,7 @@ void ScalarStairstepFilter::Refresh(
 	//Backdate our nominal update time to the exact interval
 	//so graph execution times don't cause skew of future updates.
 	//(but don't allow shifting by more than one delta)
-	double tlate = timeOfNextUpdate - now;
+	double tlate = now - timeOfNextUpdate;
 	if(tlate > (2*dt))
 		m_lastUpdate = now;
 	else
