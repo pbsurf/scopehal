@@ -39,6 +39,7 @@
 
 #include "TestWaveformSource.h"
 #include "TestDigitalWaveformSource.h"
+#include "EdgeTrigger.h"
 #include <random>
 
 /**
@@ -188,6 +189,35 @@ protected:
 	TestWaveformSource* m_source[4];
 
 	TestDigitalWaveformSource* m_digitalSource;
+
+	///@brief Trigger position, in fs from start of waveform
+	int64_t m_triggerOffset;
+
+	///@brief True if the next acquisition should ignore the trigger condition
+	bool m_triggerForced;
+
+	///@brief Direction of the last edge matched by an alternating edge trigger
+	bool m_lastTriggerEdgeRising;
+
+	///@brief Index of the channel we trigger on as of the last PushTrigger(), or -1 to free run
+	int m_triggerChannel;
+
+	///@brief Trigger level as of the last PushTrigger()
+	float m_triggerLevel;
+
+	///@brief Edge type as of the last PushTrigger()
+	EdgeTrigger::EdgeType m_triggerEdgeType;
+
+	bool FindTriggerEdge(
+		WaveformBase* wfm,
+		float level,
+		EdgeTrigger::EdgeType type,
+		int64_t tmin,
+		int64_t tmax,
+		int64_t& tcross,
+		bool& rising);
+	void CropWaveform(WaveformBase* wfm, size_t start, size_t len);
+	void RepeatWaveform(SparseDigitalWaveform* wfm, size_t period, size_t len);
 
 public:
 	static std::string GetDriverNameInternal();
