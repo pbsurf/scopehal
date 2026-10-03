@@ -83,6 +83,16 @@ public:
 	///Display color (HTML hex notation with optional alpha channel: #RRGGBB or ##RRGGBBAA)
 	std::string m_displaycolor;
 
+	std::string GetStreamDisplayColor(size_t stream) const;
+	void SetStreamDisplayColor(size_t stream, const std::string& color);
+
+	///@brief Returns true if the given stream has its own color rather than the channel's m_displaycolor
+	bool HasStreamDisplayColor(size_t stream) const
+	{ return m_streamDisplayColors.find(stream) != m_streamDisplayColors.end(); }
+
+	void SerializeStreamDisplayColors(YAML::Node& node) const;
+	void LoadStreamDisplayColors(const YAML::Node& node);
+
 	virtual void SetDisplayName(std::string name);
 	virtual std::string GetDisplayName();
 
@@ -342,6 +352,13 @@ protected:
 		@brief Configuration data for each of our output streams
 	 */
 	std::vector<Stream> m_streams;
+
+	/**
+		@brief Display colors for streams which don't use the channel's m_displaycolor, indexed by stream number
+
+		Kept separately from m_streams so that the colors survive filters recreating their streams.
+	 */
+	std::map<size_t, std::string> m_streamDisplayColors;
 };
 
 #endif

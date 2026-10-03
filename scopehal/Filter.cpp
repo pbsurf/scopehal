@@ -839,6 +839,7 @@ YAML::Node Filter::SerializeConfiguration(IDTable& table)
 	//Channel info
 	filter["protocol"] = GetProtocolDisplayName();
 	filter["color"] = m_displaycolor;
+	SerializeStreamDisplayColors(filter);
 	filter["nick"] = m_displayname;
 	filter["name"] = GetHwname();
 	filter["xunit"] = GetXAxisUnits().ToString();
@@ -875,6 +876,7 @@ void Filter::LoadParameters(const YAML::Node& node, IDTable& table)
 	//id, protocol, color are already loaded
 	m_displayname = node["nick"].as<string>();
 	m_hwname = node["name"].as<string>();
+	LoadStreamDisplayColors(node);
 
 	//Load legacy single-stream range/offset parameters
 	if(node["vrange"])

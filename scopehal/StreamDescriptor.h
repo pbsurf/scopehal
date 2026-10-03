@@ -79,6 +79,7 @@ public:
 	//None of these functions can be inlined here, because OscilloscopeChannel isn't fully declared yet.
 	//See StreamDescriptor_inlines.h for implementations
 	Unit GetXAxisUnits();
+	std::string GetDisplayColor() const;
 	Unit GetYAxisUnits();
 	WaveformBase* GetData() const;
 	bool operator==(const StreamDescriptor& rhs) const;

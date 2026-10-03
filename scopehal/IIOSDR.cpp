@@ -153,6 +153,7 @@ IIOSDR::IIOSDR(SCPITransport* transport)
 			m_channels.size());
 		m_channels.push_back(chan);
 		chan->SetDefaultDisplayName();
+		chan->SetStreamDisplayColor(1, GetQStreamColor(i));
 
 		//Range and offset are purely client side, the ADC is always full scale
 		SetChannelOffset(i, 0, 0);
@@ -218,6 +219,31 @@ string IIOSDR::GetChannelColor(size_t i)
 		case 3:
 		default:
 			return "#00ff00";
+	}
+}
+
+/**
+	@brief Default color for the Q stream of a receive channel, a neighbor of GetChannelColor() so I and Q can be told
+	apart but still look like the same channel
+
+	@param i	Channel number
+ */
+string IIOSDR::GetQStreamColor(size_t i)
+{
+	switch(i % 4)
+	{
+		case 0:
+			return "#ff8000";
+
+		case 1:
+			return "#8080ff";
+
+		case 2:
+			return "#ff4080";
+
+		case 3:
+		default:
+			return "#00d0a0";
 	}
 }
 

@@ -190,6 +190,7 @@ protected:
 	};
 
 	std::string GetChannelColor(size_t i);
+	std::string GetQStreamColor(size_t i);
 	void DetectLimits();
 	void DetectTransmitter();
 	void ApplyConfiguration();

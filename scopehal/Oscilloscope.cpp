@@ -300,6 +300,7 @@ void Oscilloscope::DoSerializeConfiguration(YAML::Node& node, IDTable& table)
 		channelNode["id"] = table.emplace(chan);
 		channelNode["index"] = i;
 		channelNode["color"] = chan->m_displaycolor;
+		chan->SerializeStreamDisplayColors(channelNode);
 		channelNode["nick"] = chan->GetDisplayName();
 		channelNode["name"] = chan->GetHwname();
 
@@ -481,6 +482,7 @@ void Oscilloscope::DoLoadConfiguration(int version, const YAML::Node& node, IDTa
 		//These are only needed for offline scopes to create a representation of the original instrument.
 
 		chan->m_displaycolor = cnode["color"].as<string>();
+		chan->LoadStreamDisplayColors(cnode);
 		chan->SetDisplayName(cnode["nick"].as<string>());
 
 		if(cnode["enabled"].as<int>())

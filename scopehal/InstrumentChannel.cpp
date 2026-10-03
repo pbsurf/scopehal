@@ -104,6 +104,73 @@ string InstrumentChannel::GetDisplayName()
 	return m_displayname;
 }
 
+/**
+	@brief Gets the display color of a stream: its own color if it has one, otherwise the channel's m_displaycolor
+ */
+string InstrumentChannel::GetStreamDisplayColor(size_t stream) const
+{
+	auto it = m_streamDisplayColors.find(stream);
+	if(it != m_streamDisplayColors.end())
+		return it->second;
+	return m_displaycolor;
+}
+
+/**
+	@brief Sets the display color of a stream (HTML hex notation)
+
+	@param stream	Stream index
+	@param color	Color for the stream, or an empty string to use the channel's m_displaycolor again
+ */
+void InstrumentChannel::SetStreamDisplayColor(size_t stream, const string& color)
+{
+	if(color.empty())
+		m_streamDisplayColors.erase(stream);
+	else
+		m_streamDisplayColors[stream] = color;
+}
+
+/**
+	@brief Saves the per-stream display colors under node["streamcolors"]
+
+	Channels with more than one stream always get the key, even if it's empty, so that loading them doesn't bring
+	back a default stream color set by the driver after the user went back to the channel color.
+ */
+void InstrumentChannel::SerializeStreamDisplayColors(YAML::Node& node) const
+{
+	if( (m_streams.size() < 2) && m_streamDisplayColors.empty())
+		return;
+
+	YAML::Node colors(YAML::NodeType::Map);
+	for(auto& it : m_streamDisplayColors)
+		colors["stream" + to_string(it.first)] = it.second;
+	node["streamcolors"] = colors;
+}
+
+/**
+	@brief Loads per-stream display colors saved by SerializeStreamDisplayColors()
+
+	If there is no node["streamcolors"] (e.g. files saved before stream colors existed), any default stream colors
+	set by the driver are kept.
+ */
+void InstrumentChannel::LoadStreamDisplayColors(const YAML::Node& node)
+{
+	auto colors = node["streamcolors"];
+	if(!colors)
+		return;
+
+	m_streamDisplayColors.clear();
+	for(auto it : colors)
+	{
+		auto key = it.first.as<string>();
+		if(key.rfind("stream", 0) != 0)
+			continue;
+		auto index = key.substr(6);
+		if(index.empty() || (index.find_first_not_of("0123456789") != string::npos) )
+			continue;
+		m_streamDisplayColors[stoul(index)] = it.second.as<string>();
+	}
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Stream management
 

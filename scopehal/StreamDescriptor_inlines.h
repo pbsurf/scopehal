@@ -43,6 +43,17 @@ inline Unit StreamDescriptor::GetXAxisUnits()
 		return m_channel->GetXAxisUnits();
 }
 
+/**
+	@brief Gets the display color of the stream (its own color if it has one, otherwise its channel's)
+ */
+inline std::string StreamDescriptor::GetDisplayColor() const
+{
+	if(m_channel == nullptr)
+		return "#808080";
+	else
+		return m_channel->GetStreamDisplayColor(m_stream);
+}
+
 inline Unit StreamDescriptor::GetYAxisUnits()
 {
 	if(m_channel == nullptr)

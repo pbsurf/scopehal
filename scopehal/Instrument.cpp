@@ -153,6 +153,7 @@ YAML::Node Instrument::SerializeConfiguration(IDTable& table) const
 		channelNode["id"] = table.emplace(chan);
 		channelNode["index"] = i;
 		channelNode["color"] = chan->m_displaycolor;
+		chan->SerializeStreamDisplayColors(channelNode);
 		channelNode["nick"] = chan->GetDisplayName();
 		channelNode["name"] = chan->GetHwname();
 
