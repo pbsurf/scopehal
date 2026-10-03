@@ -58,7 +58,7 @@ static const float g_adcScale = 1.0f / 2048;
 
 //When sweeping, how much of the capture bandwidth we step the LO by unless told otherwise. The rest is overlap between
 //adjacent captures, so that the analog filter rolloff at the edges of each capture isn't used.
-static const double g_defaultSweepStepFraction = 0.8;
+static const double g_defaultSweepStepFraction = 0.5;
 
 //Limits of the sweep step. Any bigger and there would be gaps between captures, any smaller and sweeps get very slow.
 static const double g_minSweepStepFraction = 0.1;
