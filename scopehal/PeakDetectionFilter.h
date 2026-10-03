@@ -212,12 +212,18 @@ public:
 	PeakDetectionFilter(const std::string& color, Category cat);
 	virtual ~PeakDetectionFilter();
 
-	///@brief Number of peaks to draw (the first ones of GetPeaks(), which may hold more for downstream filters)
+	///@brief Number of peaks to label. GetPeaks() holds more: candidates for the labels, and maybe more for downstream filters
 	size_t GetDisplayedPeakCount()
 	{ return std::min(static_cast<size_t>(std::max(m_numpeaks.GetIntVal(), (int64_t)0)), m_peaks.size()); }
 
 	///@brief Maximum number of peaks kept when a downstream filter consumes the peak list
 	static constexpr int64_t MAX_STORED_PEAKS = 1000;
+
+	/**
+		@brief Number of peaks kept beyond Number of Peaks, so the display can tell when a labeled peak drops out of the
+		top few only briefly (as peaks do on a noisy spectrum), and keep its label
+	 */
+	static constexpr int64_t EXTRA_LABEL_CANDIDATES = 16;
 
 protected:
 
@@ -236,8 +242,11 @@ protected:
 	void FindPeaks(T* cap, vk::raii::CommandBuffer& cmdBuf, std::shared_ptr<QueueHandle> queue)
 	{
 		//Only search if we display peaks or a downstream filter reads them (the search is slow).
+		//When displaying peaks, keep a few more as candidates for the labels (the search finds them all anyway).
 		//If a downstream filter reads them, keep every peak found (up to a cap) so it isn't limited to the displayed ones.
 		int64_t maxPeaks = std::max(m_numpeaks.GetIntVal(), (int64_t)0);
+		if(maxPeaks > 0)
+			maxPeaks += EXTRA_LABEL_CANDIDATES;
 		if(HasPeakConsumer())
 			maxPeaks = std::max(maxPeaks, MAX_STORED_PEAKS);
 
