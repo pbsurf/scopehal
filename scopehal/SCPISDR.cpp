@@ -31,6 +31,7 @@
 #include "SCPISDR.h"
 #include "TouchstoneParser.h"
 #include <fstream>
+#include <sstream>
 
 using namespace std;
 
@@ -488,11 +489,105 @@ static string LoadTouchstoneCalibration(const string& path, vector<pair<double, 
 	return "";
 }
 
+/**
+	@brief Parses one value of a JSON calibration point (a number, or a string that may have a unit)
+
+	@return True if it's a scalar that parses
+ */
+template<class T>
+static bool ParseJsonCalValue(const YAML::Node& node, bool (*parse)(const string&, T&), T& value)
+{
+	if(!node || !node.IsScalar())
+		return false;
+	return parse(node.as<string>(), value);
+}
+
+/**
+	@brief Parses JSON calibration data
+
+	The points are either [frequency, gain] pairs or {"freq" (or "frequency"): ..., "gain": ...} objects, in an array
+	that's either the whole document or under a "points" key (so there can be other things alongside it).
+
+	@return An empty string if it worked, otherwise why it didn't
+ */
+static string ParseJsonCalibration(const string& json, vector<pair<double, float> >& points)
+{
+	//yaml-cpp parses JSON, since that's (nearly) a subset of YAML
+	YAML::Node doc;
+	try
+	{
+		doc = YAML::Load(json);
+	}
+	catch(const YAML::Exception& e)
+	{
+		return "Not valid JSON: " + e.msg + " (line " + to_string(e.mark.line + 1) + ", column " +
+			to_string(e.mark.column + 1) + ")";
+	}
+
+	auto list = doc;
+	if(doc.IsMap() && doc["points"])
+		list = doc["points"];
+	if(!list.IsSequence())
+		return "Expected an array of points, or an object with a \"points\" array";
+
+	for(size_t n=0; n<list.size(); n++)
+	{
+		auto pt = list[n];
+		YAML::Node fnode;
+		YAML::Node gnode;
+		if(pt.IsSequence() && (pt.size() == 2))
+		{
+			fnode = pt[0];
+			gnode = pt[1];
+		}
+		else if(pt.IsMap())
+		{
+			fnode = pt["freq"] ? pt["freq"] : pt["frequency"];
+			gnode = pt["gain"];
+		}
+
+		double freq;
+		float gain;
+		if(!ParseJsonCalValue(fnode, ParseCalFrequency, freq) || !ParseJsonCalValue(gnode, ParseCalGain, gain))
+		{
+			return "Point " + to_string(n + 1) +
+				" is not [frequency, gain] or {\"freq\": frequency, \"gain\": gain}";
+		}
+		points.push_back(pair<double, float>(freq, gain));
+	}
+
+	return "";
+}
+
+/**
+	@brief Loads a JSON calibration file
+
+	@return An empty string if it worked, otherwise why it didn't
+ */
+static string LoadJsonCalibration(const string& path, vector<pair<double, float> >& points)
+{
+	ifstream in(path);
+	if(!in)
+		return "Could not open the file";
+	stringstream json;
+	json << in.rdbuf();
+	return ParseJsonCalibration(json.str(), points);
+}
+
+bool SCPISDR::IsCalibrationJson(const string& cal)
+{
+	auto first = cal.find_first_not_of(" \t\r\n");
+	return (first != string::npos) && ( (cal[first] == '{') || (cal[first] == '[') );
+}
+
 bool SCPISDR::SetCalibrationFile(size_t i, const string& path)
 {
 	vector<pair<double, float> > points;
 	string err;
-	if(!path.empty())
+	bool inlineJson = IsCalibrationJson(path);
+	if(inlineJson)
+		err = ParseJsonCalibration(path, points);
+	else if(!path.empty())
 	{
 		auto dot = path.rfind('.');
 		string ext = (dot == string::npos) ? "" : path.substr(dot);
@@ -502,8 +597,16 @@ bool SCPISDR::SetCalibrationFile(size_t i, const string& path)
 		//Touchstone files are .sNp, for any number of ports N
 		bool touchstone = (ext.size() >= 4) && (ext[1] == 's') && (ext.back() == 'p') &&
 			(ext.find_first_not_of("0123456789", 2) == ext.size() - 1);
-		err = touchstone ? LoadTouchstoneCalibration(path, points) : LoadTextCalibration(path, points);
+		if(touchstone)
+			err = LoadTouchstoneCalibration(path, points);
+		else if(ext == ".json")
+			err = LoadJsonCalibration(path, points);
+		else
+			err = LoadTextCalibration(path, points);
+	}
 
+	if(!path.empty())
+	{
 		if(err.empty())
 		{
 			for(auto& p : points)
@@ -516,11 +619,14 @@ bool SCPISDR::SetCalibrationFile(size_t i, const string& path)
 			}
 		}
 		if(err.empty() && points.empty())
-			err = "The file has no calibration points in it";
+			err = inlineJson ? "There are no calibration points" : "The file has no calibration points in it";
 
 		if(!err.empty())
 		{
-			LogWarning("Could not load SDR calibration file %s: %s\n", path.c_str(), err.c_str());
+			if(inlineJson)
+				LogWarning("Could not load SDR calibration JSON: %s\n", err.c_str());
+			else
+				LogWarning("Could not load SDR calibration file %s: %s\n", path.c_str(), err.c_str());
 			points.clear();
 		}
 	}

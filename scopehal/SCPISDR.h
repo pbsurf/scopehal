@@ -144,7 +144,10 @@ public:
 	 */
 	void SetExternalGain(size_t i, float gain);
 
-	///@brief Gets the path of the calibration file of channel i, or an empty string if there isn't one
+	/**
+		@brief Gets the calibration of channel i as it was set: the path of the file, the calibration itself as JSON,
+		or an empty string if there isn't one
+	 */
 	std::string GetCalibrationFile(size_t i);
 
 	/**
@@ -153,12 +156,17 @@ public:
 		The file is a list of frequency and gain in dB, the gain being how much higher the level would read than it
 		should with no calibration and zero receive gain. It's either text, one point per line (frequency in Hz,
 		optionally with an SI prefix and/or unit, then the gain, separated by commas, semicolons, tabs, or spaces, with
-		# starting comments), or a Touchstone file with two or more ports (S21 is the gain).
+		# starting comments), a Touchstone file with two or more ports (S21 is the gain), or JSON (a .json file).
+
+		JSON is an array of points, each either [frequency, gain] or {"freq": frequency, "gain": gain} ("frequency"
+		works too), or an object with that array under "points". Frequencies and gains are numbers, or strings which
+		may have a unit like the text format. Instead of a path, the JSON itself can be passed (see
+		IsCalibrationJson()), so calibration can be pasted in without a file.
 
 		The gain is interpolated linearly between points, and is the same as the nearest point outside of them.
 
 		@param i		Channel number
-		@param path		Path of the file, or an empty string for no calibration
+		@param path		Path of the file, JSON calibration data, or an empty string for no calibration
 
 		@return			True if the file was loaded. If it couldn't be, there is no calibration, and
 						GetCalibrationError() says why.
@@ -167,6 +175,9 @@ public:
 
 	///@brief Gets the reason the calibration file of channel i couldn't be loaded, or an empty string if it was
 	std::string GetCalibrationError(size_t i);
+
+	///@brief Checks if a calibration passed to SetCalibrationFile() is JSON data rather than a path (starts with { or [)
+	static bool IsCalibrationJson(const std::string& cal);
 
 	///@brief Gets the gain from the calibration file of channel i at a frequency, in dB (zero if there's no file)
 	float GetCalibrationGain(size_t i, int64_t freq);
