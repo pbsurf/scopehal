@@ -37,6 +37,7 @@
 #include "scopehal.h"
 
 #include <cinttypes>
+#include <numeric>
 
 using namespace std;
 
@@ -259,405 +260,225 @@ string Unit::ToString() const
 	}
 }
 
-/**
-	@brief Gets the appropriate SI scaling factor for a number.
- */
-void Unit::GetSIScalingFactor(double num, double& scaleFactor, string& prefix) const
+///@brief SI prefixes, largest first
+static const struct
 {
-	scaleFactor = 1;
+	///@brief Power of ten of the prefix
+	int exponent;
+
+	///@brief The prefix
+	const char* prefix;
+} g_siPrefixes[] =
+{
+	{ 12, "T" },
+	{ 9, "G" },
+	{ 6, "M" },
+	{ 3, "k" },
+	{ 0, "" },
+	{ -3, "m" },
+	{ -6, "μ" },
+	{ -9, "n" },
+	{ -12, "p" },
+	{ -15, "f" }
+};
+
+/**
+	@brief Chooses the SI prefix for a value: the largest one that keeps the number shown at least 1
+
+	@param num		Magnitude of the value, in the unit it is stored in
+	@param base		Power of ten of the unit values are stored in, relative to the unit shown (-15 for femtoseconds)
+	@param lowest	Power of ten of the smallest prefix to use. This is used if no prefix keeps the number at least 1.
+	@param highest	Power of ten of the largest prefix to use
+	@param factor	Set to the factor to multiply values by to get the number shown
+	@param prefix	Set to the prefix
+ */
+static void ChooseSIPrefix(double num, int base, int lowest, int highest, double& factor, string& prefix)
+{
+	int exponent = lowest;
 	prefix = "";
-	num = fabs(num);
-
-	//Bytes: use binary rather than decimal scaling factors
-	if(m_type == UNIT_BYTES)
+	for(auto& p : g_siPrefixes)
 	{
-		if(num >= 1024)
-		{
-			scaleFactor = 1.0 / 1024;
-			prefix = "k";
-		}
-		if(num >= 1024*1024)
-		{
-			scaleFactor = 1.0 / (1024*1024);
-			prefix = "M";
-		}
-		if(num >= 1024*1024*1024)
-		{
-			scaleFactor = 1.0 / (1024*1024*1024);
-			prefix = "G";
-		}
-		return;
+		if( (p.exponent > highest) || (p.exponent < lowest) )
+			continue;
+
+		exponent = p.exponent;
+		prefix = p.prefix;
+		if(num >= pow(10, p.exponent - base))
+			break;
 	}
 
-	if(num >= 1e12f)
-	{
-		scaleFactor = 1e-12;
-		prefix = "T";
-	}
-	else if(num >= 1e9f)
-	{
-		scaleFactor = 1e-9;
-		prefix = "G";
-	}
-	else if(num >= 1e6)
-	{
-		scaleFactor = 1e-6;
-		prefix = "M";
-	}
-	else if(num >= 1e3)
-	{
-		scaleFactor = 1e-3;
-		prefix = "k";
-	}
-	else if(num < 1)
-	{
-		scaleFactor = 1e3;
-		prefix = "m";
-	}
-	else if(num < 1e-6)
-	{
-		scaleFactor = 1e6;
-		prefix = "μ";
-	}
-	else if(num < 1e-9)
-	{
-		scaleFactor = 1e9;
-		prefix = "n";
-	}
-	else if(num < 1e-12)
-	{
-		scaleFactor = 1e12;
-		prefix = "p";
-	}
-	else if(num < 1e-15)
-	{
-		scaleFactor = 1e15;
-		prefix = "f";
-	}
+	factor = pow(10, base - exponent);
 }
 
 /**
-	@brief Gets the suffix for a unit.
+	@brief Gets how a value is shown: the scale factor, prefix, and text around the number
 
-	Note that this function may modify the SI scale factor and prefix
+	@param reference	The value to choose the prefix for
  */
-void Unit::GetUnitSuffix(UnitType type, double num, double& scaleFactor, string& prefix, string& numprefix, string& suffix) const
+Unit::Scaling Unit::GetScaling(double reference) const
 {
-	numprefix = "";
+	Scaling s;
+	s.factor = 1;
+	s.space = true;
+	double num = fabs(reference);
 
-	switch(type)
+	//Most units use SI prefixes from milli up
+	bool si = false;
+
+	switch(m_type)
 	{
-		//Special handling needed around prefixes, since it's not a SI base unit
+		//Units that aren't SI base units. Values are stored in a smaller unit, and only some prefixes are used.
 		case UNIT_FS:
-			suffix = "s";
-
-			if(fabs(num) >= 1e15)
-			{
-				scaleFactor = 1e-15;
-				prefix = "";
-			}
-			else if(fabs(num) >= 1e12)
-			{
-				scaleFactor = 1e-12;
-				prefix = "m";
-			}
-			else if(fabs(num) >= 1e9)
-			{
-				scaleFactor = 1e-9;
-				prefix = "μ";
-			}
-			else if(fabs(num) >= 1e6)
-			{
-				scaleFactor = 1e-6;
-				prefix = "n";
-			}
-			else if(fabs(num) >= 1e3)
-			{
-				scaleFactor = 1e-3;
-				prefix = "p";
-			}
-			else
-			{
-				scaleFactor = 1;
-				prefix = "f";
-			}
+			s.suffix = "s";
+			ChooseSIPrefix(num, -15, -15, 0, s.factor, s.prefix);
 			break;
 
-		//Also not a SI base unit
 		case UNIT_PM:
-			suffix = "m";
-
-			if(fabs(num) >= 1e15)
-			{
-				scaleFactor = 1e-15;
-				prefix = "k";
-			}
-			else if(fabs(num) >= 1e12)
-			{
-				scaleFactor = 1e-12;
-				prefix = "";
-			}
-			else if(fabs(num) >= 1e9)
-			{
-				scaleFactor = 1e-9;
-				prefix = "m";
-			}
-			else if(fabs(num) >= 1e6)
-			{
-				scaleFactor = 1e-6;
-				prefix = "μ";
-			}
-			else if(fabs(num) >= 1e3)
-			{
-				scaleFactor = 1e-3;
-				prefix = "n";
-			}
-			else
-			{
-				scaleFactor = 1;
-				prefix = "p";
-			}
+			s.suffix = "m";
+			ChooseSIPrefix(num, -12, -12, 3, s.factor, s.prefix);
 			break;
 
-		//uA is not a SI base unit either
 		case UNIT_MICROAMPS:
-			suffix = "A";
-
-			if(fabs(num) >= 1e12)
-			{
-				scaleFactor = 1e-12;
-				prefix = "M";
-			}
-			else if(fabs(num) >= 1e9)
-			{
-				scaleFactor = 1e-9;
-				prefix = "k";
-			}
-			else if(fabs(num) >= 1e6)
-			{
-				scaleFactor = 1e-6;
-				prefix = "";
-			}
-			else if(fabs(num) >= 1e3)
-			{
-				scaleFactor = 1e-3;
-				prefix = "m";
-			}
-			else
-			{
-				scaleFactor = 1;
-				prefix = "μ";
-			}
-
+			s.suffix = "A";
+			ChooseSIPrefix(num, -6, -6, 6, s.factor, s.prefix);
 			break;
 
-		//uHz is not a SI base unit either
 		case UNIT_MICROHZ:
-			suffix = "Hz";
-
-			if(fabs(num) >= 1e15)
-			{
-				scaleFactor = 1e-15;
-				prefix = "G";
-			}
-			else if(fabs(num) >= 1e12)
-			{
-				scaleFactor = 1e-12;
-				prefix = "M";
-			}
-			else if(fabs(num) >= 1e9)
-			{
-				scaleFactor = 1e-9;
-				prefix = "k";
-			}
-			else if(fabs(num) >= 1e6)
-			{
-				scaleFactor = 1e-6;
-				prefix = "";
-			}
-			else if(fabs(num) >= 1e3)
-			{
-				scaleFactor = 1e-3;
-				prefix = "m";
-			}
-			else
-			{
-				scaleFactor = 1;
-				prefix = "μ";
-			}
-
+			s.suffix = "Hz";
+			ChooseSIPrefix(num, -6, -6, 9, s.factor, s.prefix);
 			break;
 
-		//uV is not a SI base unit either
 		case UNIT_MICROVOLTS:
-			suffix = "V";
-
-			if(fabs(num) >= 1e12)
-			{
-				scaleFactor = 1e-12;
-				prefix = "M";
-			}
-			else if(fabs(num) >= 1e9)
-			{
-				scaleFactor = 1e-9;
-				prefix = "k";
-			}
-			else if(fabs(num) >= 1e6)
-			{
-				scaleFactor = 1e-6;
-				prefix = "";
-			}
-			else if(fabs(num) >= 1e3)
-			{
-				scaleFactor = 1e-3;
-				prefix = "m";
-			}
-			else
-			{
-				scaleFactor = 1;
-				prefix = "μ";
-			}
-
-			break;
-
-		case UNIT_HZ:
-			suffix = "Hz";
-			break;
-
-		case UNIT_SAMPLERATE:
-			suffix = "S/s";
-			break;
-
-		case UNIT_SAMPLEDEPTH:
-			suffix = "S";
-			break;
-
-		case UNIT_VOLTS:
-			suffix = "V";
-			break;
-
-		//No scaling applied, forced to mV (special case)
-		case UNIT_MILLIVOLTS:
-			suffix = "mV";
-			scaleFactor = 1;
-			prefix = "";
-			break;
-
-		case UNIT_AMPS:
-			suffix = "A";
-			break;
-
-		case UNIT_OHMS:
-			suffix = "Ω";
-			break;
-
-		case UNIT_WATTS:
-			suffix = "W";
-			break;
-
-		case UNIT_RHO:
-			suffix = "ρ";
-			break;
-
-		case UNIT_BITRATE:
-			suffix = "bps";
-			break;
-		case UNIT_UI:
-			suffix = " UI";	//move the space next to the number
-			break;
-		case UNIT_RPM:
-			suffix = "RPM";
-			break;
-
-		case UNIT_FARADS:
-			suffix = "F";
-			break;
-
-		//Angular degrees do not use SI prefixes
-		case UNIT_DEGREES:
-			suffix = "°";
-			prefix = "";
-			scaleFactor = 1;
-			break;
-
-		//Neither do thermal degrees
-		case UNIT_CELSIUS:
-			suffix = "°C";
-			prefix = "";
-			scaleFactor = 1;
-			break;
-
-		//No rescaling for pointers
-		case UNIT_HEXNUM:
-			suffix = "";
-			prefix = "";
-			numprefix = "0x";
-			scaleFactor = 1;
-			break;
-
-		//dBm are always reported as is, with no SI prefixes
-		case UNIT_DBM:
-			suffix = "dBm";
-			prefix = "";
-			scaleFactor = 1;
-			break;
-
-		//Convert fractional num to percentage
-		case UNIT_PERCENT:
-			suffix = "%";
-			prefix = "";
-			scaleFactor = 100;
-			break;
-
-		case UNIT_COUNTS_SCI:
-			suffix = "#";
-			break;
-
-		case UNIT_RATIO_SCI:
-			suffix = "";
-			break;
-
-		//Dimensionless unit, no scaling applied
-		case UNIT_DB:
-			suffix = "dB";
-			prefix = "";
-			scaleFactor = 1;
-			break;
-		case UNIT_COUNTS:
-		case UNIT_LOG_BER:
-			suffix = "";
-			prefix = "";
-			scaleFactor = 1;
-			break;
-		case UNIT_VOLT_SEC:
-			suffix = "Vs";
+			s.suffix = "V";
+			ChooseSIPrefix(num, -6, -6, 6, s.factor, s.prefix);
 			break;
 
 		//Bytes: use binary rather than decimal scaling factors
 		case UNIT_BYTES:
-			suffix = "B";
-			if(scaleFactor <= 1e-9)
-				scaleFactor = 1.0 / (1024 * 1024 * 1024);
-			else if(scaleFactor <= 1e-6)
-				scaleFactor = 1.0 / (1024 * 1024);
-			else if(scaleFactor <= 1e-3)
-				scaleFactor = 1.0 / 1024;
+			s.suffix = "B";
+			if(num >= 1024*1024*1024)
+			{
+				s.factor = 1.0 / (1024*1024*1024);
+				s.prefix = "G";
+			}
+			else if(num >= 1024*1024)
+			{
+				s.factor = 1.0 / (1024*1024);
+				s.prefix = "M";
+			}
+			else if(num >= 1024)
+			{
+				s.factor = 1.0 / 1024;
+				s.prefix = "k";
+			}
 			break;
 
-		default:
+		//No prefixes
+		case UNIT_MILLIVOLTS:
+			s.suffix = "mV";
 			break;
+
+		case UNIT_DEGREES:
+			s.suffix = "°";
+			break;
+
+		case UNIT_CELSIUS:
+			s.suffix = "°C";
+			break;
+
+		case UNIT_DBM:
+			s.suffix = "dBm";
+			break;
+
+		case UNIT_DB:
+			s.suffix = "dB";
+			break;
+
+		//Convert fractional num to percentage
+		case UNIT_PERCENT:
+			s.suffix = "%";
+			s.factor = 100;
+			break;
+
+		case UNIT_HEXNUM:
+			s.numprefix = "0x";
+			s.space = false;
+			break;
+
+		case UNIT_COUNTS:
+			s.space = false;
+			break;
+
+		case UNIT_LOG_BER:
+			break;
+
+		//SI prefixes
+		case UNIT_UI:
+			s.suffix = " UI";	//move the space next to the number
+			s.space = false;
+			si = true;
+			break;
+
+		case UNIT_HZ:			s.suffix = "Hz";	si = true;	break;
+		case UNIT_SAMPLERATE:	s.suffix = "S/s";	si = true;	break;
+		case UNIT_SAMPLEDEPTH:	s.suffix = "S";		si = true;	break;
+		case UNIT_VOLTS:		s.suffix = "V";		si = true;	break;
+		case UNIT_AMPS:			s.suffix = "A";		si = true;	break;
+		case UNIT_OHMS:			s.suffix = "Ω";		si = true;	break;
+		case UNIT_WATTS:		s.suffix = "W";		si = true;	break;
+		case UNIT_RHO:			s.suffix = "ρ";		si = true;	break;
+		case UNIT_BITRATE:		s.suffix = "bps";	si = true;	break;
+		case UNIT_RPM:			s.suffix = "RPM";	si = true;	break;
+		case UNIT_FARADS:		s.suffix = "F";		si = true;	break;
+		case UNIT_COUNTS_SCI:	s.suffix = "#";		si = true;	break;
+		case UNIT_VOLT_SEC:		s.suffix = "Vs";	si = true;	break;
+		default:										si = true;	break;
 	}
+
+	if(si)
+		ChooseSIPrefix(num, 0, -3, 12, s.factor, s.prefix);
+
+	return s;
 }
 
 /**
 	@brief Prints a value with SI scaling factors
 
 	@param value				The value
-	@param digits				Number of significant digits to display
+	@param sigfigs				Number of significant digits to display. If not positive, as many as needed are shown
+								(up to 9 after the decimal point).
 	@param useDisplayLocale		True if the string is formatted for display (user's locale)
 								False if the string is formatted for serialization ("C" locale regardless of user pref)
  */
 string Unit::PrettyPrint(double value, int sigfigs, bool useDisplayLocale) const
+{
+	return PrettyPrintScaled(value, useDisplayLocale, sigfigs);
+}
+
+/**
+	@brief Prints a value with SI scaling factors in a format suitable for tabular display
+
+	@param value				The value
+	@param leftdigits			Minimum width of the number, including the decimal point and sign
+	@param rightdigits			Number of digits after the decimal point
+ */
+string Unit::PrettyPrintTabular(double value, int leftdigits, int rightdigits) const
+{
+	return PrettyPrintScaled(value, true, -1, leftdigits, rightdigits);
+}
+
+/**
+	@brief Prints a value with SI scaling factors, with digits chosen by PrettyPrint() or PrettyPrintTabular()
+
+	@param value				The value
+	@param useDisplayLocale		True if the string is formatted for display (user's locale)
+								False if the string is formatted for serialization ("C" locale regardless of user pref)
+	@param sigfigs				Number of significant digits to display, if leftdigits is negative. If not positive
+								either, as many digits as needed are shown (up to 9 after the decimal point).
+	@param leftdigits			If not negative, minimum width of the number, as for printf()
+	@param rightdigits			Number of digits after the decimal point, if leftdigits is not negative
+ */
+string Unit::PrettyPrintScaled(double value, bool useDisplayLocale, int sigfigs, int leftdigits, int rightdigits) const
 {
 	// Special handling for overload value
 	if(value >= std::numeric_limits<double>::max())
@@ -666,35 +487,14 @@ string Unit::PrettyPrint(double value, int sigfigs, bool useDisplayLocale) const
 	if(useDisplayLocale)
 		SetPrintingLocale();
 
-	//Figure out scaling, prefix, and suffix
-	double scaleFactor;
-	string prefix;
-	string numprefix;
-	string suffix;
-	GetSIScalingFactor(value, scaleFactor, prefix);
-	GetUnitSuffix(m_type, value, scaleFactor, prefix, numprefix, suffix);
-
-	double value_rescaled = value * scaleFactor;
-
-	bool space_after_number = true;
-	switch(m_type)
-	{
-		case Unit::UNIT_UI:
-		case Unit::UNIT_HEXNUM:
-		case Unit::UNIT_COUNTS:
-			space_after_number = false;
-			break;
-
-		default:
-			break;
-	}
+	auto s = GetScaling(value);
+	double value_rescaled = value * s.factor;
 
 	char tmp[128];
 	switch(m_type)
 	{
 		case UNIT_LOG_BER:		//special formatting for BER since it's already logarithmic
 			snprintf(tmp, sizeof(tmp), "%.2e", pow(10, value));
-			//snprintf(tmp, sizeof(tmp), "1e%.2f", value);
 			break;
 
 		case UNIT_RATIO_SCI:
@@ -708,13 +508,11 @@ string Unit::PrettyPrint(double value, int sigfigs, bool useDisplayLocale) const
 
 		default:
 			{
-				const char* space = " ";
-				if(!space_after_number)
-					space = "";
+				const char* space = s.space ? " " : "";
 
-				if(sigfigs > 0)
+				if( (leftdigits < 0) && (sigfigs > 0) )
 				{
-					int leftdigits = 0;
+					leftdigits = 0;
 					if(fabs(value_rescaled) > 1000)			//shouldn't have more than 4 digits w/ SI scaling
 						leftdigits = 4;
 					else if(fabs(value_rescaled) > 100)
@@ -723,10 +521,14 @@ string Unit::PrettyPrint(double value, int sigfigs, bool useDisplayLocale) const
 						leftdigits = 2;
 					else if(fabs(value_rescaled) > 1)
 						leftdigits = 1;
-					int rightdigits = sigfigs - leftdigits;
+					rightdigits = sigfigs - leftdigits;
+				}
 
+				if(leftdigits >= 0)
+				{
 					string format = string("%") + to_string(leftdigits) + "." + to_string(rightdigits) + "f%s%s%s";
-					snprintf(tmp, sizeof(tmp), format.c_str(), value_rescaled, space, prefix.c_str(), suffix.c_str());
+					snprintf(tmp, sizeof(tmp), format.c_str(), value_rescaled, space, s.prefix.c_str(),
+						s.suffix.c_str());
 				}
 
 				//If not a round number, add as many digits as needed to show it (up to 9)
@@ -744,86 +546,16 @@ string Unit::PrettyPrint(double value, int sigfigs, bool useDisplayLocale) const
 						if(fabs(round(scaled) - scaled) <= 1e-6 * scaled)
 							break;
 					}
-					snprintf(tmp, sizeof(tmp), "%.*f%s%s%s", digits, value_rescaled, space, prefix.c_str(), suffix.c_str());
+					snprintf(tmp, sizeof(tmp), "%.*f%s%s%s", digits, value_rescaled, space, s.prefix.c_str(),
+						s.suffix.c_str());
 				}
 			}
 			break;
 	}
 
 	SetDefaultLocale();
-	return numprefix + string(tmp);
+	return s.numprefix + string(tmp);
 }
-
-/**
-	@brief Prints a value with SI scaling factors in a format suitable for tabular display
-
-	@param value				The value
-	@param digits				Number of significant digits to display
- */
-string Unit::PrettyPrintTabular(double value, int leftdigits, int rightdigits) const
-{
-	// Special handling for overload value
-	if(value >= std::numeric_limits<double>::max())
-		return UNIT_OVERLOAD_LABEL;
-
-	SetPrintingLocale();
-
-	//Figure out scaling, prefix, and suffix
-	double scaleFactor;
-	string prefix;
-	string numprefix;
-	string suffix;
-	GetSIScalingFactor(value, scaleFactor, prefix);
-	GetUnitSuffix(m_type, value, scaleFactor, prefix, numprefix, suffix);
-
-	double value_rescaled = value * scaleFactor;
-
-	bool space_after_number = true;
-	switch(m_type)
-	{
-		case Unit::UNIT_UI:
-		case Unit::UNIT_HEXNUM:
-		case Unit::UNIT_COUNTS:
-			space_after_number = false;
-			break;
-
-		default:
-			break;
-	}
-
-	char tmp[128];
-	switch(m_type)
-	{
-		case UNIT_LOG_BER:		//special formatting for BER since it's already logarithmic
-			snprintf(tmp, sizeof(tmp), "%.2e", pow(10, value));
-			//snprintf(tmp, sizeof(tmp), "1e%.2f", value);
-			break;
-
-		case UNIT_RATIO_SCI:
-			snprintf(tmp, sizeof(tmp), "%.2e", value);
-			break;
-
-		//NOTE: only works for 32 bit values or smaller
-		case UNIT_HEXNUM:
-			snprintf(tmp, sizeof(tmp), "%x", static_cast<uint32_t>(value));
-			break;
-
-		default:
-			{
-				const char* space = " ";
-				if(!space_after_number)
-					space = "";
-
-				string format = string("%") + to_string(leftdigits) + "." + to_string(rightdigits) + "f%s%s%s";
-				snprintf(tmp, sizeof(tmp), format.c_str(), value_rescaled, space, prefix.c_str(), suffix.c_str());
-			}
-			break;
-	}
-
-	SetDefaultLocale();
-	return numprefix + string(tmp);
-}
-
 
 /**
 	@brief Prints a value with SI scaling factors
@@ -856,43 +588,23 @@ string Unit::PrettyPrintInt64WithScale(int64_t value, int64_t scaleReference, in
 	if(useDisplayLocale)
 		SetPrintingLocale();
 
-	//Figure out scaling, prefix, and suffix
-	double scaleFactor;
-	string prefix;
-	string numprefix;
-	string suffix;
-	GetSIScalingFactor(scaleReference, scaleFactor, prefix);
-	GetUnitSuffix(m_type, scaleReference, scaleFactor, prefix, numprefix, suffix);
+	auto s = GetScaling(scaleReference);
 
 	//Apply the rescaling in the integer domain
-	int64_t mulFactor = scaleFactor;
-	int64_t divFactor = round(1.0 / scaleFactor);
+	int64_t mulFactor = s.factor;
+	int64_t divFactor = round(1.0 / s.factor);
 
 	int64_t value_rescaled;
-	if(scaleFactor > 1)
+	if(s.factor > 1)
 		value_rescaled = value * mulFactor;
 	else
 		value_rescaled = value / divFactor;
-
-	bool space_after_number = true;
-	switch(m_type)
-	{
-		case Unit::UNIT_UI:
-		case Unit::UNIT_HEXNUM:
-		case Unit::UNIT_COUNTS:
-			space_after_number = false;
-			break;
-
-		default:
-			break;
-	}
 
 	char tmp[128];
 	switch(m_type)
 	{
 		case UNIT_LOG_BER:		//special formatting for BER since it's already logarithmic
 			snprintf(tmp, sizeof(tmp), "%.2e", pow(10, value_rescaled));
-			//snprintf(tmp, sizeof(tmp), "1e%.2f", value);
 			break;
 
 		case UNIT_RATIO_SCI:
@@ -919,7 +631,7 @@ string Unit::PrettyPrintInt64WithScale(int64_t value, int64_t scaleReference, in
 				uint64_t magnitude = negative ? (0 - static_cast<uint64_t>(value)) : static_cast<uint64_t>(value);
 				uint64_t whole;
 				uint64_t fraction = 0;
-				if(scaleFactor > 1)
+				if(s.factor > 1)
 					whole = magnitude * mulFactor;
 				else
 				{
@@ -967,7 +679,7 @@ string Unit::PrettyPrintInt64WithScale(int64_t value, int64_t scaleReference, in
 	}
 
 	SetDefaultLocale();
-	return numprefix + string(tmp) + (space_after_number ? " " : "") + prefix + suffix;
+	return s.numprefix + string(tmp) + (s.space ? " " : "") + s.prefix + s.suffix;
 }
 
 /**
@@ -993,12 +705,7 @@ string Unit::PrettyPrintInt64WithResolution(int64_t value, double resolution, bo
 		//resolution, so that neighboring positions are shown as different values
 		//(this must use the same scaling as PrettyPrintInt64(), including special cases for units like uHz that
 		//aren't SI base units, or the digits will be off by the difference)
-		double scaleFactor;
-		string prefix;
-		string numprefix;
-		string suffix;
-		GetSIScalingFactor(value, scaleFactor, prefix);
-		GetUnitSuffix(m_type, value, scaleFactor, prefix, numprefix, suffix);
+		double scaleFactor = GetScaling(value).factor;
 		double scaledResolution = resolution * scaleFactor;
 		digits = ceil(-log10(scaledResolution) - 1e-9);
 		digits = max(0, min(MAX_INT64_DECIMALS, digits));
@@ -1037,25 +744,15 @@ string Unit::PrettyPrintRange(double pixelMin, double pixelMax, double rangeMin,
 	SetPrintingLocale();
 
 	//Figure out the scale factor to use. Use the full-scale range to select the factor even if we're small here
-	double scaleFactor;
-	string prefix;
-	string numprefix;
-	string suffix;
-	double extremeValue = max(fabs(rangeMin), fabs(rangeMax));
-	GetSIScalingFactor(extremeValue, scaleFactor, prefix);
-	GetUnitSuffix(m_type, extremeValue, scaleFactor, prefix, numprefix, suffix);
+	auto s = GetScaling(max(fabs(rangeMin), fabs(rangeMax)));
 
 	//Swap values if they're reversed
 	if(fabs(pixelMin) > fabs(pixelMax))
-	{
-		double tmp = pixelMax;
-		pixelMax = pixelMin;
-		pixelMin = tmp;
-	}
+		swap(pixelMin, pixelMax);
 
 	//Get the actual values to print
-	double valueMinRescaled = pixelMin * scaleFactor;
-	double valueMaxRescaled = pixelMax * scaleFactor;
+	double valueMinRescaled = pixelMin * s.factor;
+	double valueMaxRescaled = pixelMax * s.factor;
 
 	//Special case for log BER which is already logarithmic and doesn't need scaling
 	const size_t buflen = 32;
@@ -1069,120 +766,74 @@ string Unit::PrettyPrintRange(double pixelMin, double pixelMax, double rangeMin,
 		return string(tmp1);
 	}
 
-	//Special case for hex values
-	string out;
+	//Do the actual float to ascii conversion
 	if(m_type == Unit::UNIT_HEXNUM)
 	{
-		//Do the actual float to ascii conversion
 		snprintf(tmp1, sizeof(tmp1), "%" PRIx64, (int64_t)valueMinRescaled);
 		snprintf(tmp2, sizeof(tmp2), "%" PRIx64, (int64_t)valueMaxRescaled);
+	}
+	else
+	{
+		snprintf(tmp1, sizeof(tmp1), "%.5f", valueMinRescaled);
+		snprintf(tmp2, sizeof(tmp2), "%.5f", valueMaxRescaled);
+	}
 
-		//Special case: if zero is somewhere in the pixel, just print zero
-		if( (valueMinRescaled <= 0) && (valueMaxRescaled >= 0) )
-			out = "0";
+	//Special case: if zero is somewhere in the pixel, just print zero
+	string out;
+	if( (valueMinRescaled <= 0) && (valueMaxRescaled >= 0) )
+		out = "0";
 
-		else
+	else
+	{
+		size_t i = 0;
+
+		//Minus sign just gets echoed as-is
+		//(we know both sides are negative if we get here, no need to check max value)
+		if(valueMinRescaled < 0)
 		{
-			size_t i = 0;
+			out += "-";
+			i = 1;
+		}
 
-			//Minus sign just gets echoed as-is
-			//(we know both sides are negative if we get here, no need to check max value)
-			if(valueMinRescaled < 0)
+		//Pick out only the significant digits (tmp2 is always the larger magnitude)
+		bool foundDecimal = false;
+		for(; i<buflen; i++)
+		{
+			//If either string ends, stop
+			if( (tmp1[i] == '\0') || (tmp2[i] == '\0') )
+				break;
+
+			//If both digits are the same, echo to the output
+			else if(tmp1[i] == tmp2[i])
 			{
-				out += "-";
-				i = 1;
+				out += tmp1[i];
+				if(!isxdigit(tmp1[i]))
+					foundDecimal = true;
 			}
 
-			//Pick out only the significant digits (tmp2 is always the larger magnitude)
-			for(; i<buflen; i++)
+			//Mismatch! Figure out how to handle it
+			else
 			{
-				//If both digits are the same, echo to the output
-				if(tmp1[i] == tmp2[i])
-					out += tmp1[i];
+				//Mismatched significant digit after decimal (10.3, 10.4): just print the bigger digit and stop
+				if(foundDecimal)
+					out += tmp2[i];
 
-				//If either string ends, stop
-				else if( (tmp1[i] == '\0') || (tmp2[i] == '\0') )
-					break;
-
-				//Mismatch! Figure out how to handle it
+				//Mismatched significant digit before decimal (125, 133): print bigger digit then zeroes
 				else
 				{
-					//Mismatched significant digit? Print bigger digit then zeroes
 					out += tmp2[i];
 					i++;
 
-					//Pad with zeroes until we hit the end of the number
-					for(; (i < buflen) && (tmp2[i] != 0); i++)
-						out += '0';
-					break;
-				}
-			}
-		}
-	}
-
-	//Decimal path
-	else
-	{
-		//Do the actual float to ascii conversion
-		snprintf(tmp1, sizeof(tmp1), "%.5f", valueMinRescaled);
-		snprintf(tmp2, sizeof(tmp2), "%.5f", valueMaxRescaled);
-
-		//Special case: if zero is somewhere in the pixel, just print zero
-		if( (valueMinRescaled <= 0) && (valueMaxRescaled >= 0) )
-			out = "0";
-
-		else
-		{
-			size_t i = 0;
-
-			//Minus sign just gets echoed as-is
-			//(we know both sides are negative if we get here, no need to check max value)
-			if(valueMinRescaled < 0)
-			{
-				out += "-";
-				i = 1;
-			}
-
-			//Pick out only the significant digits (tmp2 is always the larger magnitude)
-			bool foundDecimal = false;
-			for(; i<buflen; i++)
-			{
-				//If both digits are the same, echo to the output
-				if(tmp1[i] == tmp2[i])
-				{
-					out += tmp1[i];
-					if(!isdigit(tmp1[i]))
-						foundDecimal = true;
-				}
-
-				//If either string ends, stop
-				else if( (tmp1[i] == '\0') || (tmp2[i] == '\0') )
-					break;
-
-				//Mismatch! Figure out how to handle it
-				else
-				{
-					//Mismatched significant digit after decimal (10.3, 10.4): just print the bigger digit and stop
-					if(foundDecimal)
-						out += tmp2[i];
-
-					//Mismatched significant digit before decimal (125, 133): print bigger digit then zeroes
-					else
+					//Pad with zeroes until we hit a decimal separator or the end of the number
+					for(; i<buflen; i++)
 					{
-						out += tmp2[i];
-						i++;
-
-						//Pad with zeroes until we hit a decimal separator or the end of the number
-						for(; i<buflen; i++)
-						{
-							if(!isdigit(tmp2[i]))
-								break;
-							out += '0';
-						}
+						if(!isxdigit(tmp2[i]))
+							break;
+						out += '0';
 					}
-
-					break;
 				}
+
+				break;
 			}
 		}
 	}
@@ -1191,15 +842,8 @@ string Unit::PrettyPrintRange(double pixelMin, double pixelMax, double rangeMin,
 	if(out == "-0")
 		out = "0";
 
-	//Final formatting
-	if(m_type != Unit::UNIT_UI)
-		out += " ";
-	out = numprefix + out;
-	out += prefix;
-	out += suffix;
-
 	SetDefaultLocale();
-	return out;
+	return s.numprefix + out + (s.space ? " " : "") + s.prefix + s.suffix;
 }
 
 ///@brief Where the number is in a string, as found by FindNumber()
@@ -1562,11 +1206,7 @@ bool Unit::ReformatLikeText(double value, const string& text, int cursor, string
  */
 bool Unit::IsUnitSuffix(const string& str, size_t start) const
 {
-	double scaleFactor = 1;
-	string prefix;
-	string numprefix;
-	string suffix;
-	GetUnitSuffix(m_type, 1, scaleFactor, prefix, numprefix, suffix);
+	string suffix = GetScaling(1).suffix;
 	if(suffix.empty())
 		return false;
 
@@ -1574,6 +1214,87 @@ bool Unit::IsUnitSuffix(const string& str, size_t start) const
 	while( (end > start) && isspace(static_cast<unsigned char>(str[end-1])) )
 		end --;
 	return str.compare(start, end - start, suffix) == 0;
+}
+
+/**
+	@brief Gets the factor between the unit shown and the unit values are stored in, like 1e15 for femtoseconds
+
+	As a fraction mul / div, so integer parsing can apply it exactly.
+ */
+void Unit::GetBaseScale(int64_t& mul, int64_t& div) const
+{
+	mul = 1;
+	div = 1;
+	switch(m_type)
+	{
+		case Unit::UNIT_FS:
+			mul = 1000000000000000LL;
+			break;
+
+		case Unit::UNIT_PM:
+			mul = 1000000000000LL;
+			break;
+
+		case Unit::UNIT_MICROVOLTS:
+		case Unit::UNIT_MICROHZ:
+		case Unit::UNIT_MICROAMPS:
+			mul = 1000000;
+			break;
+
+		case Unit::UNIT_PERCENT:
+			div = 100;
+			break;
+
+		default:
+			break;
+	}
+}
+
+/**
+	@brief Gets the scale of the SI prefix at a position in a string being parsed
+
+	The scale is a fraction mul / div, so integer parsing can apply it exactly. Bytes use binary prefixes.
+
+	@param str		String being parsed
+	@param i		Position of the first character after the number
+	@param mul		Set to the numerator of the scale
+	@param div		Set to the denominator of the scale
+
+	@return			True if there is a prefix at i (rather than just the unit, or nothing that's known)
+ */
+bool Unit::GetPrefixScale(const string& str, size_t i, int64_t& mul, int64_t& div) const
+{
+	mul = 1;
+	div = 1;
+
+	//The unit on its own (like "m" for meters) is not a prefix
+	if(IsUnitSuffix(str, i))
+		return false;
+
+	int64_t k = (m_type == UNIT_BYTES) ? 1024 : 1000;
+	char c = str[i];
+	if(c == 'T')
+		mul = k * k * k * k;
+	else if(c == 'G')
+		mul = k * k * k;
+	else if(c == 'M')
+		mul = k * k;
+	else if( (c == 'K') || (c == 'k') )
+		mul = k;
+	else if(c == 'm')
+		div = 1000LL;
+	else if( (c == 'u') || (str.find("μ", i) == i) )
+		div = 1000000LL;
+	else if(c == 'n')
+		div = 1000000000LL;
+	else if(c == 'p')
+		div = 1000000000000LL;
+	else if(c == 'f')
+		div = 1000000000000000LL;
+	else
+		return false;
+
+	return true;
 }
 
 /**
@@ -1603,7 +1324,7 @@ double Unit::ParseString(const string& str, bool useDisplayLocale)
 
 	else
 	{
-		//Find the first non-numeric character in the strnig
+		//Find the first non-numeric character in the string
 		double scale = 1;
 		for(size_t i=0; i<str.size(); i++)
 		{
@@ -1611,45 +1332,10 @@ double Unit::ParseString(const string& str, bool useDisplayLocale)
 			if(isspace(c) || isdigit(c) || (c == '.') || (c == ',') || (c == '-') )
 				continue;
 
-			//The unit on its own (like "m" for meters) is not a prefix
-			if(IsUnitSuffix(str, i))
-				break;
-
-			if(c == 'T')
-			{
-				scale = 1e12;
-				if(m_type == UNIT_BYTES)
-					scale = 1024 * 1024 * 1024 * 1024LL;
-			}
-			else if(c == 'G')
-			{
-				scale = 1e9;
-				if(m_type == UNIT_BYTES)
-					scale = 1024 * 1024 * 1024;
-			}
-			else if(c == 'M')
-			{
-				scale = 1e6;
-				if(m_type == UNIT_BYTES)
-					scale = 1024 * 1024;
-			}
-			else if(c == 'K' || c == 'k')
-			{
-				scale = 1e3;
-				if(m_type == UNIT_BYTES)
-					scale = 1024;
-			}
-			else if(c == 'm')
-				scale = 1e-3;
-			else if( (c == 'u') || (str.find("μ", i) == i) )
-				scale = 1e-6;
-			else if(c == 'n')
-				scale = 1e-9;
-			else if(c == 'p')
-				scale = 1e-12;
-			else if(c == 'f')
-				scale = 1e-15;
-
+			int64_t mul;
+			int64_t div;
+			if(GetPrefixScale(str, i, mul, div))
+				scale = static_cast<double>(mul) / div;
 			break;
 		}
 
@@ -1657,34 +1343,35 @@ double Unit::ParseString(const string& str, bool useDisplayLocale)
 		sscanf(str.c_str(), "%20lf", &ret);
 
 		//Apply a unit-specific scaling factor
-		switch(m_type)
-		{
-			case Unit::UNIT_FS:
-				ret *= 1e15;
-				break;
-
-			case Unit::UNIT_MICROVOLTS:
-			case Unit::UNIT_MICROHZ:
-				ret *= 1e6;
-				break;
-
-			case Unit::UNIT_PM:
-				ret *= 1e12;
-				break;
-
-			case Unit::UNIT_PERCENT:
-				ret *= 0.01;
-				break;
-
-			default:
-				break;
-		}
+		int64_t mul;
+		int64_t div;
+		GetBaseScale(mul, div);
+		ret = ret * mul / div;
 
 		ret *= scale;
 	}
 
 	SetDefaultLocale();
 	return ret;
+}
+
+/**
+	@brief Multiplies the fraction num / den by mul / div, cancelling common factors first
+
+	This keeps the numbers small, so that (for example) "1.0004 μs" doesn't overflow by being multiplied by 1e15 for
+	femtoseconds before being divided by 1e10 for the prefix and decimal places.
+ */
+static void MulFraction(int64_t& num, int64_t& den, int64_t mul, int64_t div)
+{
+	int64_t a = gcd(num, div);
+	num /= a;
+	div /= a;
+	int64_t b = gcd(mul, den);
+	mul /= b;
+	den /= b;
+
+	num *= mul;
+	den *= div;
 }
 
 /**
@@ -1711,33 +1398,9 @@ int64_t Unit::ParseStringInt64(const string& str, bool useDisplayLocale)
 	else
 	{
 		//Apply unit-specific scaling factor first
-		int64_t mulscale = 1;
-		int64_t divscale = 1;
-
-		//Apply a unit-specific scaling factor
-		switch(m_type)
-		{
-			case Unit::UNIT_FS:
-				mulscale = 1e15;
-				break;
-
-			case Unit::UNIT_PM:
-				mulscale = 1e12;
-				break;
-
-			case Unit::UNIT_MICROVOLTS:
-			case Unit::UNIT_MICROHZ:
-				mulscale = 1e6;
-				break;
-
-			case Unit::UNIT_PERCENT:
-				divscale *= 100;
-				break;
-
-			default:
-				break;
-		}
-
+		int64_t mulscale;
+		int64_t divscale;
+		GetBaseScale(mulscale, divscale);
 
 		//Remove decimal separators  and find suffixes
 		string sbase;
@@ -1752,7 +1415,7 @@ int64_t Unit::ParseStringInt64(const string& str, bool useDisplayLocale)
 			{
 				sbase += c;
 				if(foundDecimal)
-					divscale *= 10;
+					MulFraction(mulscale, divscale, 1, 10);
 				continue;
 			}
 			else if(c == '-')
@@ -1765,48 +1428,11 @@ int64_t Unit::ParseStringInt64(const string& str, bool useDisplayLocale)
 				foundDecimal = true;
 				continue;
 			}
-			//The unit on its own (like "m" for meters) is not a prefix
-			else if(IsUnitSuffix(str, i))
-				break;
-			else if(c == 'T')
-			{
-				if(m_type == UNIT_BYTES)
-					mulscale *= 1024 * 1024 * 1024 * 1024LL;
-				else
-					mulscale *= 1e12;
-			}
-			else if(c == 'G')
-			{
-				if(m_type == UNIT_BYTES)
-					mulscale *= 1024 * 1024 * 1024;
-				else
-					mulscale *= 1e9;
-			}
-			else if(c == 'M')
-			{
-				if(m_type == UNIT_BYTES)
-					mulscale *= 1024 * 1024;
-				else
-					mulscale *= 1e6;
-			}
-			else if(c == 'K' || c == 'k')
-			{
-				if(m_type == UNIT_BYTES)
-					mulscale *= 1024;
-				else
-					mulscale *= 1e3;
-			}
-			else if(c == 'm')
-				divscale *= 1e3;
-			else if( (c == 'u') || (str.find("μ", i) == i) )
-				divscale = 1e6;
-			else if(c == 'n')
-				divscale *= 1e9;
-			else if(c == 'p')
-				divscale *= 1e12;
-			else if(c == 'f')
-				divscale *= 1e15;
 
+			int64_t mul;
+			int64_t div;
+			if(GetPrefixScale(str, i, mul, div))
+				MulFraction(mulscale, divscale, mul, div);
 			break;
 		}
 

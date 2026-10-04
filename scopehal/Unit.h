@@ -169,8 +169,30 @@ public:
 protected:
 	UnitType m_type;
 
-	void GetSIScalingFactor(double num, double& scaleFactor, std::string& prefix) const;
-	void GetUnitSuffix(UnitType type, double num, double& scaleFactor, std::string& prefix, std::string& numprefix, std::string& suffix) const;
+	///@brief How values are shown: the scale factor, and the text around the number
+	struct Scaling
+	{
+		///@brief Factor to multiply values by to get the number shown
+		double factor;
+
+		///@brief SI prefix, like "k"
+		std::string prefix;
+
+		///@brief Text before the number, like "0x"
+		std::string numprefix;
+
+		///@brief The unit, like "Hz"
+		std::string suffix;
+
+		///@brief True if there is a space between the number and the prefix
+		bool space;
+	};
+
+	Scaling GetScaling(double reference) const;
+	std::string PrettyPrintScaled(
+		double value, bool useDisplayLocale, int sigfigs, int leftdigits = -1, int rightdigits = -1) const;
+	void GetBaseScale(int64_t& mul, int64_t& div) const;
+	bool GetPrefixScale(const std::string& str, size_t i, int64_t& mul, int64_t& div) const;
 	bool IsUnitSuffix(const std::string& str, size_t start) const;
 
 #ifdef _WIN32
