@@ -52,6 +52,8 @@ public:
 	PROTOCOL_DECODER_INITPROC(TrendFilter)
 
 protected:
+	int64_t GetTimeDelta(SparseWaveformBase* wfm, double now);
+
 	double m_tlast;
 
 	FilterParameter& m_depth;

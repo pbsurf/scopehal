@@ -32,6 +32,12 @@
 
 using namespace std;
 
+///@brief Timestamp resolution of the output waveform (1 ns, well below the precision of GetTime())
+static const int64_t TREND_TIMESCALE = 1000000;
+
+///@brief Largest time step between two samples, in TREND_TIMESCALE ticks (about 31 years)
+static const double TREND_MAX_DELTA = 1e18;
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Construction / destruction
 
@@ -72,6 +78,37 @@ bool TrendFilter::ShouldPersistWaveform()
 void TrendFilter::ClearSweeps()
 {
 	SetData(nullptr, 0);
+}
+
+/**
+	@brief Get the time since the previous sample, in output timescale ticks
+
+	Also converts waveforms loaded from older sessions (which used femtosecond ticks) to the current timescale, and
+	recovers the time of the last sample if the waveform was loaded from a saved session.
+
+	Must be called before the waveform start timestamp is updated.
+ */
+int64_t TrendFilter::GetTimeDelta(SparseWaveformBase* wfm, double now)
+{
+	if(wfm->m_timescale != TREND_TIMESCALE)
+	{
+		double scale = static_cast<double>(wfm->m_timescale) / TREND_TIMESCALE;
+		size_t len = wfm->m_offsets.size();
+		for(size_t i=0; i<len; i++)
+		{
+			wfm->m_offsets[i] = llround(wfm->m_offsets[i] * scale);
+			wfm->m_durations[i] = llround(wfm->m_durations[i] * scale);
+		}
+		wfm->m_timescale = TREND_TIMESCALE;
+	}
+
+	//The most recent sample is always at offset zero, so the waveform start time is when it arrived
+	if( (m_tlast == 0) && !wfm->m_offsets.empty())
+		m_tlast = wfm->m_startTimestamp + wfm->m_startFemtoseconds / FS_PER_SECOND;
+
+	//Clamp to avoid overflow if the clock jumps (negative steps would put samples out of order)
+	double dt = (now - m_tlast) * FS_PER_SECOND / TREND_TIMESCALE;
+	return llround(clamp(dt, 0.0, TREND_MAX_DELTA));
 }
 
 void TrendFilter::Refresh(
@@ -122,21 +159,21 @@ void TrendFilter::Refresh(
 			SetData(wfm, 0);
 
 			wfm->m_triggerPhase = 0;
-			wfm->m_timescale = 1;
+			wfm->m_timescale = TREND_TIMESCALE;
 			m_tlast = now;
 		}
 		wfm->PrepareForCpuAccess();
 		wfm->m_revision ++;
 
+		//Update duration of previous sample
+		size_t len = wfm->m_samples.size();
+		int64_t dt = GetTimeDelta(wfm, now);
+		if(len > 0)
+			wfm->m_durations[len-1] = dt;
+
 		//Update timestamp
 		wfm->m_startTimestamp = floor(now);
 		wfm->m_startFemtoseconds = (now - wfm->m_startTimestamp) * FS_PER_SECOND;
-
-		//Update duration of previous sample
-		size_t len = wfm->m_samples.size();
-		double dt = (now - m_tlast) * FS_PER_SECOND;
-		if(len > 0)
-			wfm->m_durations[len-1] = dt;
 
 		//Add the new sample
 		wfm->m_samples.push_back(din.GetScalarValue());
@@ -186,21 +223,21 @@ void TrendFilter::Refresh(
 			SetData(wfm, 0);
 
 			wfm->m_triggerPhase = 0;
-			wfm->m_timescale = 1;
+			wfm->m_timescale = TREND_TIMESCALE;
 			m_tlast = now;
 		}
 		wfm->PrepareForCpuAccess();
 		wfm->m_revision ++;
 
+		//Update duration of previous sample
+		size_t len = wfm->m_samples.size();
+		int64_t dt = GetTimeDelta(wfm, now);
+		if(len > 0)
+			wfm->m_durations[len-1] = dt;
+
 		//Update timestamp
 		wfm->m_startTimestamp = floor(now);
 		wfm->m_startFemtoseconds = (now - wfm->m_startTimestamp) * FS_PER_SECOND;
-
-		//Update duration of previous sample
-		size_t len = wfm->m_samples.size();
-		double dt = (now - m_tlast) * FS_PER_SECOND;
-		if(len > 0)
-			wfm->m_durations[len-1] = dt;
 
 
 		//Add the new sample
