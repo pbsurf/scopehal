@@ -143,6 +143,13 @@ public:
 		std::string& newText,
 		int& newCursor);
 
+	bool ReformatLikeText(
+		double value,
+		const std::string& text,
+		int cursor,
+		std::string& newText,
+		int& newCursor);
+
 	bool operator==(const Unit& rhs)
 	{ return m_type == rhs.m_type; }
 

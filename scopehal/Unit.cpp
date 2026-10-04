@@ -1202,6 +1202,95 @@ string Unit::PrettyPrintRange(double pixelMin, double pixelMax, double rangeMin,
 	return out;
 }
 
+///@brief Where the number is in a string, as found by FindNumber()
+struct NumberInText
+{
+	///@brief Position of the sign, or of the first digit if there's no sign
+	size_t signPos;
+
+	///@brief Position of the first digit (or decimal mark, if there are no integer digits)
+	size_t digitsStart;
+
+	///@brief Position of the decimal mark, or string::npos if there isn't one
+	size_t mark;
+
+	///@brief Position of the first character after the number
+	size_t numEnd;
+
+	///@brief True if the number has a "-" sign
+	bool negative;
+
+	///@brief True if the number has a "+" sign
+	bool explicitPlus;
+
+	///@brief Number of digits before the decimal mark
+	int intDigits;
+
+	///@brief Number of digits after the decimal mark
+	int fracDigits;
+};
+
+/**
+	@brief Finds the number at the start of a string: optional spaces and sign, then digits with at most one decimal mark
+ */
+static NumberInText FindNumber(const string& text)
+{
+	size_t n = text.size();
+	NumberInText num;
+
+	size_t i = 0;
+	while( (i < n) && isspace(static_cast<unsigned char>(text[i])) )
+		i ++;
+	num.signPos = i;
+	num.negative = false;
+	num.explicitPlus = false;
+	if( (i < n) && ( (text[i] == '-') || (text[i] == '+') ) )
+	{
+		num.negative = (text[i] == '-');
+		num.explicitPlus = !num.negative;
+		i ++;
+	}
+	num.digitsStart = i;
+	num.mark = string::npos;
+	while(i < n)
+	{
+		char c = text[i];
+		if(isdigit(static_cast<unsigned char>(c)))
+			i ++;
+		else if( ( (c == '.') || (c == ',') ) && (num.mark == string::npos) )
+		{
+			num.mark = i;
+			i ++;
+		}
+		else
+			break;
+	}
+	num.numEnd = i;
+
+	num.intDigits = static_cast<int>( ((num.mark == string::npos) ? num.numEnd : num.mark) - num.digitsStart );
+	num.fracDigits = (num.mark == string::npos) ? 0 : static_cast<int>(num.numEnd - num.mark - 1);
+	return num;
+}
+
+/**
+	@brief Finds the place value (as a power of ten) of the digit that StepNumericText() steps for a cursor position
+
+	@param num		The number, as found by FindNumber()
+	@param cursor	Cursor position. Positions outside the number are treated as being at its nearest end.
+ */
+static int CursorExponent(const NumberInText& num, int cursor)
+{
+	//Cursor relative to the first digit
+	int rel = min(max(cursor, static_cast<int>(num.digitsStart)), static_cast<int>(num.numEnd)) -
+		static_cast<int>(num.digitsStart);
+
+	//After the decimal mark. Right after the mark itself is the ones digit, otherwise count fractional digits.
+	if( (num.mark != string::npos) && (rel > num.intDigits) )
+		return (rel == num.intDigits + 1) ? 0 : -(rel - num.intDigits - 1);
+
+	return num.intDigits - rel;
+}
+
 /**
 	@brief Increments or decrements the digit to the left of the cursor in a number being edited by the user
 
@@ -1233,38 +1322,15 @@ bool Unit::StepNumericText(const string& text, int cursor, bool increment, strin
 {
 	size_t n = text.size();
 
-	//Find the number: optional sign, then digits with at most one decimal mark
-	size_t i = 0;
-	while( (i < n) && isspace(static_cast<unsigned char>(text[i])) )
-		i ++;
-	size_t signPos = i;
-	bool negative = false;
-	bool explicitPlus = false;
-	if( (i < n) && ( (text[i] == '-') || (text[i] == '+') ) )
-	{
-		negative = (text[i] == '-');
-		explicitPlus = !negative;
-		i ++;
-	}
-	size_t digitsStart = i;
-	size_t mark = string::npos;
-	while(i < n)
-	{
-		char c = text[i];
-		if(isdigit(static_cast<unsigned char>(c)))
-			i ++;
-		else if( ( (c == '.') || (c == ',') ) && (mark == string::npos) )
-		{
-			mark = i;
-			i ++;
-		}
-		else
-			break;
-	}
-	size_t numEnd = i;
-
-	int intDigits = static_cast<int>( ((mark == string::npos) ? numEnd : mark) - digitsStart );
-	int fracDigits = (mark == string::npos) ? 0 : static_cast<int>(numEnd - mark - 1);
+	auto num = FindNumber(text);
+	size_t signPos = num.signPos;
+	bool negative = num.negative;
+	bool explicitPlus = num.explicitPlus;
+	size_t digitsStart = num.digitsStart;
+	size_t mark = num.mark;
+	size_t numEnd = num.numEnd;
+	int intDigits = num.intDigits;
+	int fracDigits = num.fracDigits;
 	if(intDigits + fracDigits == 0)
 		return false;
 
@@ -1284,16 +1350,8 @@ bool Unit::StepNumericText(const string& text, int cursor, bool increment, strin
 		return StepNumericText(widened, widenedCursor, increment, newText, newCursor);
 	}
 
-	//Work out which digit we're stepping. Cursor is relative to the first digit.
-	int rel = min(max(cursor, static_cast<int>(digitsStart)), static_cast<int>(numEnd)) - static_cast<int>(digitsStart);
-	int exponent;
-	if( (mark != string::npos) && (rel > intDigits) )
-	{
-		//After the decimal mark. Right after the mark itself is the ones digit, otherwise count fractional digits.
-		exponent = (rel == intDigits + 1) ? 0 : -(rel - intDigits - 1);
-	}
-	else
-		exponent = intDigits - rel;
+	//Work out which digit we're stepping
+	int exponent = CursorExponent(num, cursor);
 
 	//Digits of the magnitude, least significant first. Leave room for the digit we're stepping and for a carry.
 	vector<int> d;
@@ -1389,6 +1447,103 @@ bool Unit::StepNumericText(const string& text, int cursor, bool increment, strin
 	newCursor = cursor;
 	if(cursor >= static_cast<int>(digitsStart))
 		newCursor += static_cast<int>(newText.size()) - static_cast<int>(n);
+	newCursor = min(max(newCursor, 0), static_cast<int>(newText.size()));
+
+	return true;
+}
+
+/**
+	@brief Formats a value like a number being edited by the user, keeping the cursor on the same digit place
+
+	This is for when the value in a box the user is stepping with StepNumericText() is changed by something else, for
+	example because an instrument limited the value to its range. Rather than switching to whatever PrettyPrint() would
+	show, the value is shown with the prefix, unit and decimal mark of the text, and the cursor is put after the digit
+	with the same place value as before, so the next step is the same size. Leading zeros are added if the value doesn't
+	have a digit there: with the cursor at "1| MHz", 200 kHz becomes "0|.2 MHz", and with the cursor at "1|0 MHz",
+	5 MHz becomes "0|5 MHz".
+
+	At least as many decimal places as the text had are shown, more if the value needs them.
+
+	@param value		Value to format
+	@param text			Text being edited, in the form described in StepNumericText()
+	@param cursor		Cursor position, as a byte offset into text
+	@param newText		The value, formatted like text
+	@param newCursor	Cursor position in newText
+
+	@return				True if text has a number and value could be formatted like it. If false, newText and
+						newCursor are not modified.
+ */
+bool Unit::ReformatLikeText(double value, const string& text, int cursor, string& newText, int& newCursor)
+{
+	auto num = FindNumber(text);
+	if(num.intDigits + num.fracDigits == 0)
+		return false;
+
+	//Scale of the prefix and unit after the number, like 1e6 for " MHz"
+	string suffix = text.substr(num.numEnd);
+	double scale = ParseString("1" + suffix);
+	if(!isfinite(scale) || (scale == 0))
+		return false;
+	double x = fabs(value / scale);
+	if(!isfinite(x) || (x >= 1e15))
+		return false;
+
+	//Place of the digit the cursor is on, if it's in the number
+	bool inNumber = (cursor <= static_cast<int>(num.numEnd));
+	int exponent = CursorExponent(num, cursor);
+	bool beforeDigits = (cursor <= static_cast<int>(num.digitsStart));
+
+	//Same number of decimal places as the text, more if the value needs them, and enough to have the cursor digit
+	int decimals = num.fracDigits;
+	if(inNumber && (exponent < 0))
+		decimals = max(decimals, -exponent);
+	while(decimals < num.fracDigits + 9)
+	{
+		double p = pow(10, decimals);
+		if(fabs(round(x * p) / p - x) <= x * 1e-7)
+			break;
+		decimals ++;
+	}
+
+	char buf[64];
+	snprintf(buf, sizeof(buf), "%.*f", decimals, x);
+	string digits(buf);
+
+	//Use the decimal mark of the text, whatever the C locale has
+	size_t dot = digits.find_first_not_of("0123456789");
+	if(dot != string::npos)
+		digits[dot] = (num.mark != string::npos) ? text[num.mark] : m_decimalSeparator;
+	int newInt = static_cast<int>( (dot == string::npos) ? digits.size() : dot );
+
+	//Add leading zeros if needed so there's still a digit at the cursor's place
+	int wantInt = 0;
+	if(inNumber && (exponent >= 0))
+		wantInt = beforeDigits ? exponent : exponent + 1;
+	if(newInt < wantInt)
+	{
+		digits.insert(0, wantInt - newInt, '0');
+		newInt = wantInt;
+	}
+
+	string sign;
+	if( (value < 0) && (digits.find_first_of("123456789") != string::npos) )
+		sign = "-";
+	else if(num.explicitPlus)
+		sign = "+";
+
+	newText = text.substr(0, num.signPos) + sign + digits + suffix;
+	int newDigitsStart = static_cast<int>(num.signPos + sign.size());
+	int newNumEnd = newDigitsStart + static_cast<int>(digits.size());
+	if(!inNumber)
+		newCursor = newNumEnd + (cursor - static_cast<int>(num.numEnd));
+	else if(cursor < static_cast<int>(num.digitsStart))
+		newCursor = min(cursor, newDigitsStart);
+	else if( (num.mark != string::npos) && (dot != string::npos) && (cursor == static_cast<int>(num.mark) + 1) )
+		newCursor = newDigitsStart + newInt + 1;
+	else if(exponent >= 0)
+		newCursor = newDigitsStart + newInt - exponent;
+	else
+		newCursor = newDigitsStart + newInt + 1 - exponent;
 	newCursor = min(max(newCursor, 0), static_cast<int>(newText.size()));
 
 	return true;
