@@ -38,6 +38,7 @@
 
 #include "scopehal.h"
 #include "IIOMockContext.h"
+#include <complex>
 
 using namespace std;
 
@@ -45,7 +46,7 @@ static const char* g_phy = "ad9361-phy";
 static const char* g_rxData = "cf-ad9361-lpc";
 static const char* g_txData = "cf-ad9361-dds-core-lpc";
 
-//Receive gain the mock's AGC settles at: the gain at which the simulated signals have their nominal amplitude
+//Receive gain the mock's AGC settles at
 static const char* g_mockAgcGain = "20.000000 dB";
 
 //Sample rate limits without FIR decimation
@@ -127,7 +128,7 @@ IIOMockContext::IIOMockContext(const string& uri, const Variant& variant)
 			}
 			else
 			{
-				//Running AGC, which settles at the gain the simulated signals are defined at
+				//Running AGC, which settles at 20 dB
 				AddAttr(g_phy, id, output, "hardwaregain", g_mockAgcGain);
 				AddAttr(g_phy, id, output, "gain_control_mode", "slow_attack");
 				AddAttr(g_phy, id, output, "rssi", "70.00 dB", false);
@@ -482,21 +483,57 @@ bool IIOMockContext::WriteChannelAttr(
 // Streaming
 
 /**
-	@brief Simulated RF environment: frequency in Hz and amplitude as a fraction of ADC full scale
+	@brief Simulated RF environment: frequency in Hz and power at the RX input in dBm
  */
 struct MockTone
 {
 	double freq;
-	double amplitude;
+	double dbm;
 };
 
 static const MockTone g_mockTones[] =
 {
-	{ 433920000, 0.30 },
-	{ 915000000, 0.30 },
-	{ 2400500000, 0.50 },
-	{ 2412000000, 0.40 },
-	{ 2437000000, 0.30 }
+	{ 433920000, -55 },
+	{ 915000000, -60 },
+	{ 2400500000, -40 },
+	{ 2412000000, -50 },
+	{ 2437000000, -60 }
+};
+
+//Each TX path is looped back to the RX path with the same number, as if through a cable and an attenuator
+static const double g_loopbackLossDb = 30;
+
+//Output power of a full scale tone (DDS scale 1) at 0 dB transmit attenuation
+static const double g_txFullScaleDbm = 7;
+
+//Receiver noise: thermal noise at the input plus the noise figure, and the noise of the ADC itself (in counts)
+static const double g_thermalNoiseDbmPerHz = -174;
+static const double g_noiseFigureDb = 3;
+static const double g_adcNoiseCounts = 0.3;
+
+//ADC counts for a signal at full scale
+static const double g_adcFullScale = 2048;
+
+/**
+	@brief Gets the amplitude of I and Q, at the RX input, of a tone with the given power
+
+	The units are the ones the driver refers the samples to (full scale at 0 dB gain is 1), and power is (2A)^2 / 50
+	ohms like the Complex FFT, so what it displays is the power that went in.
+ */
+static double InputAmplitude(double dbm)
+{
+	return sqrt(50 * pow(10, (dbm - 30) / 10)) / 2;
+}
+
+/**
+	@brief A complex exponential in the baseband of an RX path
+
+	The I samples are the real part of amplitude * exp(j * 2pi * freq * t), the Q samples are the imaginary part.
+ */
+struct MockExponential
+{
+	double freq;
+	complex<double> amplitude;
 };
 
 /**
@@ -565,61 +602,118 @@ bool IIOMockContext::CaptureBlock(
 		m_sampleIndex += depth;
 	}
 
-	//Signal level of each RX path. AGC holds it constant (at the 20 dB reference), manual gain scales it.
-	vector<double> pathGain;
+	//Gain of each RX path: AGC always settles at 20 dB
+	vector<double> gainDb;
 	{
 		lock_guard<recursive_mutex> lock(m_mutex);
 		for(size_t i=0; i<m_variant.numChannels; i++)
 		{
 			string id = "voltage" + to_string(i);
 			string mode;
-			double gainDb = 20;
-			ReadAttr(g_phy, id, false, "gain_control_mode", mode);
 			string gain;
-			if(ReadAttr(g_phy, id, false, "hardwaregain", gain))
-				gainDb = strtod(gain.c_str(), nullptr);
-			pathGain.push_back( (mode == "manual") ? pow(10, (gainDb - 20) / 20) : 1.0);
+			double g = 20;
+			if(ReadAttr(g_phy, id, false, "gain_control_mode", mode) && (mode == "manual") &&
+				ReadAttr(g_phy, id, false, "hardwaregain", gain))
+			{
+				g = strtod(gain.c_str(), nullptr);
+			}
+			gainDb.push_back(g);
 		}
 	}
 
 	//Signals outside the analog filter or the Nyquist bandwidth are gone
 	double halfBand = min(bw, rate) / 2.0;
 
-	//Noise floor of a few counts
-	normal_distribution<double> noise(0, 6);
+	//Everything each RX path receives, in ADC counts
+	vector<vector<MockExponential> > signals(m_variant.numChannels);
+	vector<double> noiseCounts;
+	for(size_t p=0; p<m_variant.numChannels; p++)
+	{
+		auto& sig = signals[p];
+		double gain = pow(10, gainDb[p] / 20);
+
+		//The environment. The second RX path sees a slightly weaker and phase shifted version of the same signals.
+		double envGain = ( (p == 0) ? 1.0 : 0.6 ) * gain * g_adcFullScale;
+		for(auto& tone : g_mockTones)
+		{
+			double fbb = tone.freq - lo;
+			if(fabs(fbb) <= halfBand)
+				sig.push_back({ fbb, polar(InputAmplitude(tone.dbm) * envGain, p * M_PI / 3) });
+		}
+
+		//The TX path looped back to it. Each DDS is scale * sin(2pi f t + phase), with I and Q as the real and
+		//imaginary parts of the transmitted signal, so a DDS is a pair of exponentials at +/- its frequency.
+		{
+			lock_guard<recursive_mutex> lock(m_mutex);
+			string txId = "voltage" + to_string(p);
+			int64_t txLo;
+			double txGainDb;
+			if(ReadChannelAttrInt(g_phy, "altvoltage1", true, "frequency", txLo) &&
+				ReadChannelAttrDouble(g_phy, txId, true, "hardwaregain", txGainDb))
+			{
+				double link = InputAmplitude(g_txFullScaleDbm + txGainDb - g_loopbackLossDb) * gain * g_adcFullScale;
+				double offset = static_cast<double>(txLo - lo);
+				for(size_t k=0; k<4; k++)
+				{
+					string id = "altvoltage" + to_string(p*4 + k);
+					bool q = (k >= 2);
+					string raw;
+					double freq;
+					double scale;
+					double phase;
+					if( !ReadAttr(g_txData, id, true, "raw", raw) || (raw != "1") ||
+						!ReadChannelAttrDouble(g_txData, id, true, "frequency", freq) ||
+						!ReadChannelAttrDouble(g_txData, id, true, "scale", scale) ||
+						!ReadChannelAttrDouble(g_txData, id, true, "phase", phase) )
+					{
+						continue;
+					}
+
+					//sin(x) = (exp(jx) - exp(-jx)) / 2j, and Q is the imaginary part
+					complex<double> rail = q ? complex<double>(0, 1) : complex<double>(1, 0);
+					complex<double> half = rail * link * scale / complex<double>(0, 2);
+					double rad = phase / 1000 * M_PI / 180;
+					for(int sign : { 1, -1 })
+					{
+						double fbb = offset + sign*freq;
+						if(fabs(fbb) <= halfBand)
+							sig.push_back({ fbb, static_cast<double>(sign) * half * polar(1.0, sign * rad) });
+					}
+				}
+			}
+		}
+
+		//Thermal noise over the sample rate, split between I and Q, and the ADC's own noise on top
+		double thermal = sqrt(50 * pow(10, (g_thermalNoiseDbmPerHz + g_noiseFigureDb - 30) / 10) * rate / 8);
+		thermal *= gain * g_adcFullScale;
+		noiseCounts.push_back(sqrt(thermal*thermal + g_adcNoiseCounts*g_adcNoiseCounts));
+	}
 
 	data.clear();
 	data.resize(channels.size());
 	const double twoPi = 2 * M_PI;
 	for(size_t i=0; i<channels.size(); i++)
 	{
-		//The second RX path sees a slightly weaker and phase shifted version of the same signals
-		double gain = ( (path[i] == 0) ? 1.0 : 0.6 ) * pathGain[path[i]];
-		double phaseOffset = path[i] * M_PI / 3;
-
 		vector<double> acc(depth, 0.0);
-		for(auto& tone : g_mockTones)
+		for(auto& e : signals[path[i]])
 		{
-			double fbb = tone.freq - lo;
-			if(fabs(fbb) > halfBand)
-				continue;
-
-			double amp = tone.amplitude * gain * 2047;
 			for(size_t j=0; j<depth; j++)
 			{
-				double cycles = fmod(fbb * static_cast<double>(start + j) / rate, 1.0);
-				double phase = twoPi * cycles + phaseOffset;
-				acc[j] += amp * (isQ[i] ? sin(phase) : cos(phase));
+				double cycles = fmod(e.freq * static_cast<double>(start + j) / rate, 1.0);
+				auto v = e.amplitude * polar(1.0, twoPi * cycles);
+				acc[j] += isQ[i] ? v.imag() : v.real();
 			}
 		}
 
+		//Clip at full scale like the ADC does
+		normal_distribution<double> noise(0, noiseCounts[path[i]]);
 		auto& out = data[i];
 		out.resize(depth);
 		lock_guard<recursive_mutex> lock(m_mutex);
 		for(size_t j=0; j<depth; j++)
 		{
 			double v = acc[j] + noise(m_rng);
-			out[j] = static_cast<int16_t>(min(2047.0, max(-2048.0, round(v))));
+			out[j] = static_cast<int16_t>(min(g_adcFullScale - 1, max(-g_adcFullScale, round(v))));
 		}
 	}
 
