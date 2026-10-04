@@ -285,6 +285,8 @@ static const struct
 /**
 	@brief Chooses the SI prefix for a value: the largest one that keeps the number shown at least 1
 
+	Zero has no prefix (or the closest one to none that the unit uses), so it's "0 V" rather than "0 fV".
+
 	@param num		Magnitude of the value, in the unit it is stored in
 	@param base		Power of ten of the unit values are stored in, relative to the unit shown (-15 for femtoseconds)
 	@param lowest	Power of ten of the smallest prefix to use. This is used if no prefix keeps the number at least 1.
@@ -303,7 +305,12 @@ static void ChooseSIPrefix(double num, int base, int lowest, int highest, double
 
 		exponent = p.exponent;
 		prefix = p.prefix;
-		if(num >= pow(10, p.exponent - base))
+		if(num == 0)
+		{
+			if(p.exponent <= 0)
+				break;
+		}
+		else if(num >= pow(10, p.exponent - base))
 			break;
 	}
 
@@ -322,7 +329,7 @@ Unit::Scaling Unit::GetScaling(double reference) const
 	s.space = true;
 	double num = fabs(reference);
 
-	//Most units use SI prefixes from milli up
+	//Most units use all of the SI prefixes
 	bool si = false;
 
 	switch(m_type)
@@ -436,7 +443,7 @@ Unit::Scaling Unit::GetScaling(double reference) const
 	}
 
 	if(si)
-		ChooseSIPrefix(num, 0, -3, 12, s.factor, s.prefix);
+		ChooseSIPrefix(num, 0, -15, 12, s.factor, s.prefix);
 
 	return s;
 }
