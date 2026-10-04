@@ -45,6 +45,9 @@ static const char* g_phy = "ad9361-phy";
 static const char* g_rxData = "cf-ad9361-lpc";
 static const char* g_txData = "cf-ad9361-dds-core-lpc";
 
+//Receive gain the mock's AGC settles at: the gain at which the simulated signals have their nominal amplitude
+static const char* g_mockAgcGain = "20.000000 dB";
+
 //Sample rate limits without FIR decimation
 static const int64_t g_minSampleRateHz = 2083334;
 static const int64_t g_maxSampleRateHz = 61440000;
@@ -124,7 +127,8 @@ IIOMockContext::IIOMockContext(const string& uri, const Variant& variant)
 			}
 			else
 			{
-				AddAttr(g_phy, id, output, "hardwaregain", "71.000000 dB");
+				//Running AGC, which settles at the gain the simulated signals are defined at
+				AddAttr(g_phy, id, output, "hardwaregain", g_mockAgcGain);
 				AddAttr(g_phy, id, output, "gain_control_mode", "slow_attack");
 				AddAttr(g_phy, id, output, "rssi", "70.00 dB", false);
 
@@ -420,6 +424,14 @@ bool IIOMockContext::WriteAttr(
 			LogError("Failed to write IIO attribute %s = \"%s\": %s\n", what.c_str(), value.c_str(), strerror(EINVAL));
 			return false;
 		}
+
+		//AGC takes over the gain
+		if(value != "manual")
+		{
+			auto gain = m_attrs.find(MakeKey(dev, chan, output, "hardwaregain"));
+			if(gain != m_attrs.end())
+				gain->second.value = g_mockAgcGain;
+		}
 	}
 
 	it->second.value = value;
@@ -553,7 +565,7 @@ bool IIOMockContext::CaptureBlock(
 		m_sampleIndex += depth;
 	}
 
-	//Signal level of each RX path. AGC holds it constant, manual gain scales it.
+	//Signal level of each RX path. AGC holds it constant (at the 20 dB reference), manual gain scales it.
 	vector<double> pathGain;
 	{
 		lock_guard<recursive_mutex> lock(m_mutex);

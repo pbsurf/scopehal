@@ -155,11 +155,9 @@ IIOSDR::IIOSDR(SCPITransport* transport)
 		chan->SetDefaultDisplayName();
 		chan->SetStreamDisplayColor(1, GetQStreamColor(i));
 
-		//Range and offset are purely client side, the ADC is always full scale
+		//Range and offset are purely client side, the ADC is always full scale. The range is set once we know the gain.
 		SetChannelOffset(i, 0, 0);
 		SetChannelOffset(i, 1, 0);
-		SetChannelVoltageRange(i, 0, 2);
-		SetChannelVoltageRange(i, 1, 2);
 
 		//RSSI is only read on request, so there's nothing to show until then
 		m_rssiStream = chan->AddRSSIStream();
@@ -173,6 +171,7 @@ IIOSDR::IIOSDR(SCPITransport* transport)
 		m_channelEnabled[0] = true;
 
 	m_gain.resize(m_numRx, 0);
+	m_hwGain.resize(m_numRx, 0);
 	m_gainMode.resize(m_numRx);
 	m_gainDirty.resize(m_numRx, false);
 	m_gainModeDirty.resize(m_numRx, false);
@@ -183,6 +182,14 @@ IIOSDR::IIOSDR(SCPITransport* transport)
 
 	//Adopt whatever the radio is currently doing rather than stomping on it
 	ReadHardwareConfiguration();
+
+	//Default range is the full scale of the ADC, referred to the input
+	for(size_t i=0; i<m_numRx; i++)
+	{
+		float fullScale = 2 * pow(10, -GetInputGain(i, m_hwCenterFreq, m_hwGain[i]) / 20);
+		SetChannelVoltageRange(i, 0, fullScale);
+		SetChannelVoltageRange(i, 1, fullScale);
+	}
 	LogDebug("IIO SDR has %zu receive path(s), LO %" PRId64 " Hz, rate %" PRIu64 " Hz, bandwidth %" PRId64 " Hz\n",
 		m_numRx, m_centerFreq, m_sampleRate, m_span);
 	if(m_numTx > 0)
@@ -506,7 +513,10 @@ void IIOSDR::ReadHardwareConfiguration()
 		if(m_ctx->ReadChannelAttr(g_phyDevice, id, false, "gain_control_mode", mode))
 			m_gainMode[i] = mode;
 		if(m_ctx->ReadChannelAttrDouble(g_phyDevice, id, false, "hardwaregain", gain))
+		{
 			m_gain[i] = gain;
+			m_hwGain[i] = gain;
+		}
 		m_gainDirty[i] = false;
 		m_gainModeDirty[i] = false;
 	}
@@ -763,8 +773,12 @@ void IIOSDR::ApplyConfiguration()
 			m_gainMode[i] = hwGainMode[i];
 
 		//If we still owe the radio a gain (waiting for manual mode) don't clobber it with what's there now
-		if(haveGain[i] && !m_gainDirty[i])
-			m_gain[i] = hwGain[i];
+		if(haveGain[i])
+		{
+			m_hwGain[i] = hwGain[i];
+			if(!m_gainDirty[i])
+				m_gain[i] = hwGain[i];
+		}
 	}
 
 	if(m_numTx > 0)
@@ -930,6 +944,14 @@ void IIOSDR::SetGain(size_t i, float gain)
 	lock_guard<recursive_mutex> lock(m_cacheMutex);
 	m_gain[i] = min(max(gain, m_limits.minGain), m_limits.maxGain);
 	m_gainDirty[i] = true;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Level correction
+
+bool IIOSDR::HasLevelCorrection(size_t i)
+{
+	return m_ctx && (i < m_numRx);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1363,6 +1385,7 @@ bool IIOSDR::AcquireData()
 	//Snapshot what we're capturing. Channels come in I/Q pairs (voltage0 = RX1 I, voltage1 = RX1 Q, ...)
 	vector<size_t> paths;
 	vector<bool> readRSSI;
+	vector<bool> agc;
 	vector<string> iioChannels;
 	size_t depth;
 	bool sweepEnabled;
@@ -1382,6 +1405,7 @@ bool IIOSDR::AcquireData()
 				continue;
 			paths.push_back(i);
 			readRSSI.push_back(m_rssiEnabled[i]);
+			agc.push_back(m_gainMode[i] != "manual");
 			iioChannels.push_back("voltage" + to_string(i*2));
 			iioChannels.push_back("voltage" + to_string(i*2 + 1));
 		}
@@ -1446,6 +1470,24 @@ bool IIOSDR::AcquireData()
 		auto& idata = data[n*2];
 		auto& qdata = data[n*2 + 1];
 
+		//AGC moves the gain around by itself, so find out what it was for this capture (read after the capture, like
+		//the RSSI, and only while AGC is running since it's a round trip to the radio)
+		if(agc[n])
+		{
+			double gain;
+			if(m_ctx->ReadChannelAttrDouble(g_phyDevice, "voltage" + to_string(i), false, "hardwaregain", gain))
+			{
+				m_hwGain[i] = gain;
+
+				lock_guard<recursive_mutex> lock(m_cacheMutex);
+				if(!m_gainDirty[i])
+					m_gain[i] = gain;
+			}
+		}
+
+		//Refer the samples to the input, taking out the gain of the radio and whatever is in front of it
+		float scale = g_adcScale * pow(10, -GetInputGain(i, centerFreq, m_hwGain[i]) / 20);
+
 		string base = m_nickname + "." + GetOscilloscopeChannel(i)->GetHwname();
 		auto icap = AllocateAnalogWaveform(base + ".i");
 		icap->m_timescale = fs_per_sample;
@@ -1461,13 +1503,13 @@ bool IIOSDR::AcquireData()
 		qcap->m_startFemtoseconds = (now - floor(now)) * FS_PER_SECOND;
 		qcap->Resize(depth);
 
-		//Convert to floating point, normalized to full scale = +/- 1
+		//Convert to floating point
 		icap->PrepareForCpuAccess();
 		qcap->PrepareForCpuAccess();
 		for(size_t j=0; j<depth; j++)
 		{
-			icap->m_samples[j] = idata[j] * g_adcScale;
-			qcap->m_samples[j] = qdata[j] * g_adcScale;
+			icap->m_samples[j] = idata[j] * scale;
+			qcap->m_samples[j] = qdata[j] * scale;
 		}
 		icap->MarkSamplesModifiedFromCpu();
 		qcap->MarkSamplesModifiedFromCpu();

@@ -29,6 +29,8 @@
 
 #include "scopehal.h"
 #include "SCPISDR.h"
+#include "TouchstoneParser.h"
+#include <fstream>
 
 using namespace std;
 
@@ -283,6 +285,282 @@ void SCPISDR::SetGain(size_t /*i*/, float /*gain*/)
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Level correction (default is no correction)
+
+bool SCPISDR::HasLevelCorrection(size_t /*i*/)
+{
+	return false;
+}
+
+float SCPISDR::GetExternalGain(size_t i)
+{
+	lock_guard<recursive_mutex> lock(m_cacheMutex);
+	return m_levelCorrection[i].m_externalGain;
+}
+
+void SCPISDR::SetExternalGain(size_t i, float gain)
+{
+	lock_guard<recursive_mutex> lock(m_cacheMutex);
+	auto& lc = m_levelCorrection[i];
+	float scale = pow(10, (lc.m_externalGain - gain) / 20);
+	lc.m_externalGain = gain;
+
+	//Scale the I/Q streams the same way the samples will be, so the waveform stays where it was on screen
+	auto chan = GetOscilloscopeChannel(i);
+	if(!chan)
+		return;
+	for(size_t j=0; j<chan->GetStreamCount(); j++)
+	{
+		if(chan->GetYAxisUnits(j) != Unit(Unit::UNIT_VOLTS))
+			continue;
+		auto key = pair<size_t, size_t>(i, j);
+		m_channelVoltageRange[key] *= scale;
+		m_channelOffset[key] *= scale;
+	}
+}
+
+string SCPISDR::GetCalibrationFile(size_t i)
+{
+	lock_guard<recursive_mutex> lock(m_cacheMutex);
+	return m_levelCorrection[i].m_calFile;
+}
+
+string SCPISDR::GetCalibrationError(size_t i)
+{
+	lock_guard<recursive_mutex> lock(m_cacheMutex);
+	return m_levelCorrection[i].m_calError;
+}
+
+/**
+	@brief Parses a frequency in Hz, optionally followed by an SI prefix and/or "Hz" (for example "2.4e9", "2400 MHz",
+	or "2.4G")
+
+	@return True if the whole string was a frequency
+ */
+static bool ParseCalFrequency(const string& str, double& freq)
+{
+	const char* start = str.c_str();
+	char* end = nullptr;
+	freq = strtod(start, &end);
+	if(end == start)
+		return false;
+
+	while(isspace(static_cast<unsigned char>(*end)))
+		end++;
+	switch(*end)
+	{
+		case 'k':
+		case 'K':
+			freq *= 1e3;
+			end++;
+			break;
+
+		case 'M':
+			freq *= 1e6;
+			end++;
+			break;
+
+		case 'G':
+			freq *= 1e9;
+			end++;
+			break;
+
+		case 'T':
+			freq *= 1e12;
+			end++;
+			break;
+
+		default:
+			break;
+	}
+	if( (tolower(end[0]) == 'h') && (tolower(end[1]) == 'z') )
+		end += 2;
+	while(isspace(static_cast<unsigned char>(*end)))
+		end++;
+
+	return (*end == '\0') && isfinite(freq);
+}
+
+/**
+	@brief Parses a gain in dB, optionally followed by "dB"
+
+	@return True if the whole string was a gain
+ */
+static bool ParseCalGain(const string& str, float& gain)
+{
+	const char* start = str.c_str();
+	char* end = nullptr;
+	gain = strtof(start, &end);
+	if(end == start)
+		return false;
+
+	while(isspace(static_cast<unsigned char>(*end)))
+		end++;
+	if( (tolower(end[0]) == 'd') && (tolower(end[1]) == 'b') )
+		end += 2;
+	while(isspace(static_cast<unsigned char>(*end)))
+		end++;
+
+	return (*end == '\0') && isfinite(gain);
+}
+
+/**
+	@brief Loads a text calibration file, one "frequency, gain" point per line
+
+	@return An empty string if it worked, otherwise why it didn't
+ */
+static string LoadTextCalibration(const string& path, vector<pair<double, float> >& points)
+{
+	ifstream in(path);
+	if(!in)
+		return "Could not open the file";
+
+	string line;
+	size_t lineNum = 0;
+	while(getline(in, line))
+	{
+		lineNum ++;
+
+		//Throw away comments and blank lines
+		auto hash = line.find('#');
+		if(hash != string::npos)
+			line.resize(hash);
+		auto first = line.find_first_not_of(" \t\r");
+		if(first == string::npos)
+			continue;
+		line = line.substr(first, line.find_last_not_of(" \t\r") - first + 1);
+
+		//Split into fields, using whitespace only if there's no other separator (so "2.4 GHz, 3" works)
+		vector<string> fields;
+		bool whitespace = (line.find_first_of(",;\t") == string::npos);
+		string field;
+		for(auto c : line)
+		{
+			bool sep = whitespace ? (c == ' ') : ( (c == ',') || (c == ';') || (c == '\t') );
+			if(!sep)
+				field += c;
+			else if(!field.empty() || !whitespace)
+			{
+				fields.push_back(field);
+				field.clear();
+			}
+		}
+		fields.push_back(field);
+
+		double freq;
+		float gain;
+		bool ok = (fields.size() == 2) && ParseCalFrequency(fields[0], freq) && ParseCalGain(fields[1], gain);
+		if(!ok)
+		{
+			//A header line is allowed before the first point
+			char c = line[0];
+			if(points.empty() && !isdigit(static_cast<unsigned char>(c)) && (c != '.') && (c != '-') && (c != '+'))
+				continue;
+			return "Line " + to_string(lineNum) + " is not a frequency and a gain: \"" + line + "\"";
+		}
+		points.push_back(pair<double, float>(freq, gain));
+	}
+
+	return "";
+}
+
+/**
+	@brief Loads a Touchstone calibration file, using S21 as the gain
+
+	@return An empty string if it worked, otherwise why it didn't
+ */
+static string LoadTouchstoneCalibration(const string& path, vector<pair<double, float> >& points)
+{
+	SParameters params;
+	TouchstoneParser parser;
+	if(!parser.Load(path, params))
+		return "Could not load the Touchstone file (see the log for details)";
+	if(params.GetNumPorts() < 2)
+		return "The Touchstone file has only one port, it needs at least two for S21";
+
+	auto& s21 = params[SPair(2, 1)];
+	s21.m_points.PrepareForCpuAccess();
+	for(size_t j=0; j<s21.size(); j++)
+	{
+		auto& p = s21[j];
+		points.push_back(pair<double, float>(p.m_frequency, 20 * log10(p.m_amplitude)));
+	}
+	return "";
+}
+
+bool SCPISDR::SetCalibrationFile(size_t i, const string& path)
+{
+	vector<pair<double, float> > points;
+	string err;
+	if(!path.empty())
+	{
+		auto dot = path.rfind('.');
+		string ext = (dot == string::npos) ? "" : path.substr(dot);
+		for(auto& c : ext)
+			c = tolower(c);
+
+		//Touchstone files are .sNp, for any number of ports N
+		bool touchstone = (ext.size() >= 4) && (ext[1] == 's') && (ext.back() == 'p') &&
+			(ext.find_first_not_of("0123456789", 2) == ext.size() - 1);
+		err = touchstone ? LoadTouchstoneCalibration(path, points) : LoadTextCalibration(path, points);
+
+		if(err.empty())
+		{
+			for(auto& p : points)
+			{
+				if(!isfinite(p.second))
+				{
+					err = "The gain at " + Unit(Unit::UNIT_HZ).PrettyPrint(p.first) + " is not a number";
+					break;
+				}
+			}
+		}
+		if(err.empty() && points.empty())
+			err = "The file has no calibration points in it";
+
+		if(!err.empty())
+		{
+			LogWarning("Could not load SDR calibration file %s: %s\n", path.c_str(), err.c_str());
+			points.clear();
+		}
+	}
+	sort(points.begin(), points.end());
+
+	lock_guard<recursive_mutex> lock(m_cacheMutex);
+	auto& lc = m_levelCorrection[i];
+	lc.m_calFile = path;
+	lc.m_calError = err;
+	lc.m_calPoints = points;
+	return err.empty();
+}
+
+float SCPISDR::GetCalibrationGain(size_t i, int64_t freq)
+{
+	lock_guard<recursive_mutex> lock(m_cacheMutex);
+	auto& points = m_levelCorrection[i].m_calPoints;
+	if(points.empty())
+		return 0;
+
+	//Flat beyond the ends
+	double f = freq;
+	if(f <= points.front().first)
+		return points.front().second;
+	if(f >= points.back().first)
+		return points.back().second;
+
+	//Linear interpolation between the points on either side
+	auto hi = lower_bound(points.begin(), points.end(), pair<double, float>(f, -INFINITY));
+	auto lo = hi - 1;
+	double frac = (f - lo->first) / (hi->first - lo->first);
+	return lo->second + frac * (hi->second - lo->second);
+}
+
+float SCPISDR::GetInputGain(size_t i, int64_t freq, float rxGain)
+{
+	return rxGain + GetExternalGain(i) + GetCalibrationGain(i, freq);
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Received signal strength (default is no RSSI)
 
 bool SCPISDR::HasRSSI(size_t /*i*/)
@@ -425,7 +703,8 @@ void SCPISDR::DoSerializeConfiguration(YAML::Node& node, IDTable& /*table*/)
 	{
 		bool hasGain = HasGainControl(i);
 		bool hasRSSI = HasRSSI(i);
-		if(!hasGain && !hasRSSI)
+		bool hasLevel = HasLevelCorrection(i);
+		if(!hasGain && !hasRSSI && !hasLevel)
 			continue;
 
 		YAML::Node channelNode = channels["ch" + to_string(i)];
@@ -439,6 +718,11 @@ void SCPISDR::DoSerializeConfiguration(YAML::Node& node, IDTable& /*table*/)
 		}
 		if(hasRSSI)
 			channelNode["rssi"] = IsRSSIEnabled(i);
+		if(hasLevel)
+		{
+			channelNode["externalgain"] = GetExternalGain(i);
+			channelNode["calfile"] = GetCalibrationFile(i);
+		}
 	}
 }
 
@@ -508,6 +792,19 @@ void SCPISDR::DoLoadConfiguration(int /*version*/, const YAML::Node& node, IDTab
 
 		if(HasRSSI(i) && cnode["rssi"])
 			SetRSSIEnabled(i, cnode["rssi"].as<bool>());
+
+		if(HasLevelCorrection(i))
+		{
+			//Oscilloscope has already loaded the range and offset, which go with this external gain, so don't
+			//rescale them like SetExternalGain() would
+			if(cnode["externalgain"])
+			{
+				lock_guard<recursive_mutex> lock(m_cacheMutex);
+				m_levelCorrection[i].m_externalGain = cnode["externalgain"].as<float>();
+			}
+			if(cnode["calfile"])
+				SetCalibrationFile(i, cnode["calfile"].as<string>());
+		}
 	}
 }
 

@@ -121,6 +121,66 @@ public:
 	virtual void SetGain(size_t i, float gain);
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+	// Level correction
+	//
+	// Drivers that scale their samples to the signal level at the input (with the receive gain taken out) override
+	// HasLevelCorrection(), and use GetInputGain() to find out how much gain to take out. The rest is handled here,
+	// and is entirely client side.
+	//
+	// The gain from the input to the samples is the receive gain, plus the external gain (for example -20 dB for a pad
+	// in front of the input, so the level is the one at the input of the pad), plus the gain from the calibration file
+	// at the LO frequency.
+
+	///@brief Returns true if the driver corrects the level of channel i for the gain in front of the samples
+	virtual bool HasLevelCorrection(size_t i);
+
+	///@brief Gets the gain of whatever is in front of the input of channel i (negative for attenuation), in dB
+	float GetExternalGain(size_t i);
+
+	/**
+		@brief Sets the gain of whatever is in front of the input of channel i, in dB
+
+		The vertical range and offset are scaled to match, so the waveform looks the same as before.
+	 */
+	void SetExternalGain(size_t i, float gain);
+
+	///@brief Gets the path of the calibration file of channel i, or an empty string if there isn't one
+	std::string GetCalibrationFile(size_t i);
+
+	/**
+		@brief Loads the calibration file of channel i
+
+		The file is a list of frequency and gain in dB, the gain being how much higher the level would read than it
+		should with no calibration and zero receive gain. It's either text, one point per line (frequency in Hz,
+		optionally with an SI prefix and/or unit, then the gain, separated by commas, semicolons, tabs, or spaces, with
+		# starting comments), or a Touchstone file with two or more ports (S21 is the gain).
+
+		The gain is interpolated linearly between points, and is the same as the nearest point outside of them.
+
+		@param i		Channel number
+		@param path		Path of the file, or an empty string for no calibration
+
+		@return			True if the file was loaded. If it couldn't be, there is no calibration, and
+						GetCalibrationError() says why.
+	 */
+	bool SetCalibrationFile(size_t i, const std::string& path);
+
+	///@brief Gets the reason the calibration file of channel i couldn't be loaded, or an empty string if it was
+	std::string GetCalibrationError(size_t i);
+
+	///@brief Gets the gain from the calibration file of channel i at a frequency, in dB (zero if there's no file)
+	float GetCalibrationGain(size_t i, int64_t freq);
+
+	/**
+		@brief Gets the gain from the input of channel i to the samples, in dB
+
+		@param i		Channel number
+		@param freq		LO frequency, in Hz
+		@param rxGain	Receive gain of the radio, in dB
+	 */
+	float GetInputGain(size_t i, int64_t freq, float rxGain);
+
+	////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 	// Received signal strength
 	//
 	// Drivers for radios that can measure RSSI override these. The defaults describe a radio that can't.
@@ -235,6 +295,29 @@ protected:
 protected:
 	std::map<std::pair<size_t, size_t>, float> m_channelVoltageRange;
 	std::map<std::pair<size_t, size_t>, float> m_channelOffset;
+
+	///@brief Level correction settings of one channel
+	struct LevelCorrection
+	{
+		LevelCorrection()
+		: m_externalGain(0)
+		{}
+
+		///@brief Gain in front of the input, in dB
+		float m_externalGain;
+
+		///@brief Path of the calibration file
+		std::string m_calFile;
+
+		///@brief Why the calibration file couldn't be loaded (empty if it was)
+		std::string m_calError;
+
+		///@brief Calibration points as (frequency in Hz, gain in dB), sorted by frequency
+		std::vector<std::pair<double, float> > m_calPoints;
+	};
+
+	///@brief Level correction settings, indexed by channel. Protected by m_cacheMutex
+	std::map<size_t, LevelCorrection> m_levelCorrection;
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 	// Dynamic creation

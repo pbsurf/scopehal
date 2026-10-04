@@ -48,6 +48,10 @@
 	The receive paths are ComplexChannels streaming I/Q samples. If the radio has the usual DDS core in the FPGA, each
 	transmit path is also exposed as an SDRTransmitChannel which can generate up to two tones.
 
+	The I/Q samples are in volts at the input: the ADC counts are divided by the receive gain, and by the external gain
+	and calibration (see SCPISDR::GetInputGain()). With no calibration this isn't exact, but the level no longer moves
+	when the gain does.
+
 	Configuration changes are cached and pushed to the hardware by BackgroundProcessing(), which runs on the
 	instrument thread between acquisitions. This means the GUI thread never blocks on the radio, and never contends
 	with a capture that is in progress. The values reported by the getters are the requested settings, clamped to the
@@ -124,6 +128,9 @@ public:
 	virtual std::pair<float, float> GetGainRange(size_t i) override;
 	virtual float GetGain(size_t i) override;
 	virtual void SetGain(size_t i, float gain) override;
+
+	//Level correction
+	virtual bool HasLevelCorrection(size_t i) override;
 
 	//Received signal strength
 	virtual bool HasRSSI(size_t i) override;
@@ -268,6 +275,10 @@ protected:
 	///@brief Configuration currently active in the hardware. Only touched by the instrument thread.
 	int64_t m_hwCenterFreq;
 	uint64_t m_hwSampleRate;
+
+	///@brief Receive gain currently active in the hardware, in dB. Only touched by the instrument thread.
+	///(With AGC running this changes by itself, so it's read back on every acquisition.)
+	std::vector<float> m_hwGain;
 
 	///@brief LO frequencies of the sweep in progress (empty if not sweeping). Only touched by the instrument thread.
 	std::vector<int64_t> m_sweepFreqs;
