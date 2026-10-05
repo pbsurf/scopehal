@@ -85,13 +85,27 @@ size_t BinarySearchForGequal(T* buf, size_t len, T value)
 template size_t BinarySearchForGequal<int64_t>(int64_t* buf, size_t len, int64_t value);
 template size_t BinarySearchForGequal<float>(float* buf, size_t len, float value);
 
+/**
+	@brief Converts a timestamp (or other X axis value) to waveform ticks
+
+	This is done in double precision, so that X axis values too large for an int64_t (e.g. times more than about 2.5
+	hours from zero, in fs) can be used with waveforms whose timescale is coarse enough to represent them.
+ */
+static double TimestampToTicks(const WaveformBase* wfm, double time_fs)
+{
+	return (time_fs - wfm->m_triggerPhase) / wfm->m_timescale;
+}
+
+///@brief Largest tick count we convert a double to, comfortably below the largest int64_t
+static constexpr double MAX_TICKS = 9e18;
+
 // Logic to 'step back' one sample is required. Think of the case of a waveform with samples at
 // 0 (duration 2) and 3 (duration 2). If the requested time_fs results in ticks = 1.5, then target
 // = floor(1.5) = 1. Then searching for the index of the offset greater than or equal to 1 yields
 // sample #1 (at time 3.) We must then 'step back' to sample #0 since we want the sample closest
 // BEFORE our selected time. In the case that time_fs is such that it yields a ticks = 3 EXACTLY
 // this is not required.
-size_t GetIndexNearestAtOrBeforeTimestamp(WaveformBase* wfm, int64_t time_fs, bool& out_of_bounds)
+size_t GetIndexNearestAtOrBeforeTimestamp(WaveformBase* wfm, double time_fs, bool& out_of_bounds)
 {
 	//Make sure we have a current copy of the data
 	wfm->PrepareForCpuAccess();
@@ -99,10 +113,11 @@ size_t GetIndexNearestAtOrBeforeTimestamp(WaveformBase* wfm, int64_t time_fs, bo
 	if (!wfm->size())
 		return 0;
 
-	double ticks = 1.0f * (time_fs - wfm->m_triggerPhase) / wfm->m_timescale;
+	double ticks = TimestampToTicks(wfm, time_fs);
 
 	//Find the approximate index of the sample of interest and interpolate the cursor position
-	int64_t target = floor(ticks);
+	//(clamped so a time far outside the waveform can't overflow)
+	int64_t target = clamp(floor(ticks), -MAX_TICKS, MAX_TICKS);
 
 	int64_t result;
 
@@ -156,7 +171,7 @@ size_t GetIndexNearestAtOrBeforeTimestamp(WaveformBase* wfm, int64_t time_fs, bo
 	}
 }
 
-optional<float> GetValueAtTime(WaveformBase* waveform, int64_t time_fs, bool zero_hold_behavior)
+optional<float> GetValueAtTime(WaveformBase* waveform, double time_fs, bool zero_hold_behavior)
 {
 	auto swaveform = dynamic_cast<SparseAnalogWaveform*>(waveform);
 	auto uwaveform = dynamic_cast<UniformAnalogWaveform*>(waveform);
@@ -178,7 +193,7 @@ optional<float> GetValueAtTime(WaveformBase* waveform, int64_t time_fs, bool zer
 	{
 		if (swaveform)
 		{
-			if (GetOffsetScaled(swaveform, index) + GetDurationScaled(swaveform, index) < time_fs)
+			if( (swaveform->m_offsets[index] + swaveform->m_durations[index]) < TimestampToTicks(waveform, time_fs) )
 			{
 				// Sample found with GE search does not extend to selected point
 				return {};
@@ -189,7 +204,7 @@ optional<float> GetValueAtTime(WaveformBase* waveform, int64_t time_fs, bool zer
 	}
 
 	//In bounds, interpolate
-	double ticks = 1.0f * (time_fs - waveform->m_triggerPhase) / waveform->m_timescale;
+	double ticks = TimestampToTicks(waveform, time_fs);
 
 	if(swaveform)
 		return Filter::InterpolateValue(swaveform, index, ticks - swaveform->m_offsets[index]);
@@ -197,7 +212,7 @@ optional<float> GetValueAtTime(WaveformBase* waveform, int64_t time_fs, bool zer
 		return Filter::InterpolateValue(uwaveform, index, ticks - index );
 }
 
-optional<bool> GetDigitalValueAtTime(WaveformBase* waveform, int64_t time_fs)
+optional<bool> GetDigitalValueAtTime(WaveformBase* waveform, double time_fs)
 {
 	auto swaveform = dynamic_cast<SparseDigitalWaveform*>(waveform);
 	auto uwaveform = dynamic_cast<UniformDigitalWaveform*>(waveform);
@@ -217,7 +232,7 @@ optional<bool> GetDigitalValueAtTime(WaveformBase* waveform, int64_t time_fs)
 	//No interpolation for digital waveforms
 	if (swaveform)
 	{
-		if (GetOffsetScaled(swaveform, index) + GetDurationScaled(swaveform, index) < time_fs)
+		if( (swaveform->m_offsets[index] + swaveform->m_durations[index]) < TimestampToTicks(waveform, time_fs) )
 		{
 			// Sample found with GE search does not extend to selected point
 			return {};
@@ -227,7 +242,7 @@ optional<bool> GetDigitalValueAtTime(WaveformBase* waveform, int64_t time_fs)
 	return GetValue(swaveform, uwaveform, index);
 }
 
-optional<uint64_t> GetDigitalBusValueAtTime(WaveformBase* waveform, int64_t time_fs)
+optional<uint64_t> GetDigitalBusValueAtTime(WaveformBase* waveform, double time_fs)
 {
 	auto waveform32 = dynamic_cast<UniformDigitalBusWaveform32*>(waveform);
 	auto waveform64 = dynamic_cast<UniformDigitalBusWaveform64*>(waveform);
@@ -252,7 +267,7 @@ optional<uint64_t> GetDigitalBusValueAtTime(WaveformBase* waveform, int64_t time
 		return waveform64->m_samples[index];
 }
 
-optional<string> GetProtocolValueAtTime(WaveformBase* waveform, int64_t time_fs)
+optional<string> GetProtocolValueAtTime(WaveformBase* waveform, double time_fs)
 {
 	//All protocol waveforms are sparse
 	auto swaveform = dynamic_cast<SparseWaveformBase*>(waveform);
@@ -269,7 +284,7 @@ optional<string> GetProtocolValueAtTime(WaveformBase* waveform, int64_t time_fs)
 		return {};
 
 	//No interpolation for digital waveforms
-	if (GetOffsetScaled(swaveform, index) + GetDurationScaled(swaveform, index) < time_fs)
+	if( (swaveform->m_offsets[index] + swaveform->m_durations[index]) < TimestampToTicks(waveform, time_fs) )
 	{
 		// Sample found with GE search does not extend to selected point
 		return {};

@@ -983,32 +983,32 @@ size_t BinarySearchForGequal(T* buf, size_t len, T value);
    refers to a sample that includes time_fs, check that `GetOffsetScaled(swaveform, index) +
    GetDurationScaled(swaveform, index) < time_fs`
  */
-size_t GetIndexNearestAtOrBeforeTimestamp(WaveformBase* wfm, int64_t time_fs, bool& out_of_bounds);
+size_t GetIndexNearestAtOrBeforeTimestamp(WaveformBase* wfm, double time_fs, bool& out_of_bounds);
 
 /**
 	@brief Gets the value of our channel at the specified timestamp (absolute, not waveform ticks)
 	and interpolates if possible.
 	@ingroup datamodel
  */
-std::optional<float> GetValueAtTime(WaveformBase* waveform, int64_t time_fs, bool zero_hold_behavior);
+std::optional<float> GetValueAtTime(WaveformBase* waveform, double time_fs, bool zero_hold_behavior);
 
 /**
 	@brief Gets the value of our channel at the specified timestamp (absolute, not waveform ticks).
 	@ingroup datamodel
  */
-std::optional<bool> GetDigitalValueAtTime(WaveformBase* waveform, int64_t time_fs);
+std::optional<bool> GetDigitalValueAtTime(WaveformBase* waveform, double time_fs);
 
 /**
 	@brief Gets the value of our channel at the specified timestamp (absolute, not waveform ticks).
 	@ingroup datamodel
  */
-std::optional<uint64_t> GetDigitalBusValueAtTime(WaveformBase* waveform, int64_t time_fs);
+std::optional<uint64_t> GetDigitalBusValueAtTime(WaveformBase* waveform, double time_fs);
 
 /**
 	@brief Gets the value of our channel at the specified timestamp (absolute, not waveform ticks).
 	@ingroup datamodel
  */
-std::optional<std::string> GetProtocolValueAtTime(WaveformBase* waveform, int64_t time_fs);
+std::optional<std::string> GetProtocolValueAtTime(WaveformBase* waveform, double time_fs);
 
 #pragma GCC diagnostic pop
 
